@@ -1,4 +1,6 @@
 # CloudWatch Observability IAM Role
+# Note: This role is created before the cluster, using a placeholder OIDC provider pattern
+# The actual OIDC provider ARN is populated after cluster creation
 resource "aws_iam_role" "cloudwatch_observability" {
   name = "${var.environment_name}-cloudwatch-observability"
 
@@ -22,6 +24,8 @@ resource "aws_iam_role" "cloudwatch_observability" {
   })
 
   tags = var.tags
+
+  depends_on = [module.eks_cluster]
 }
 
 resource "aws_iam_role_policy_attachment" "cloudwatch_observability" {
@@ -70,6 +74,24 @@ resource "aws_eks_addon" "secrets_store_csi_driver" {
   depends_on = [module.eks_cluster]
 }
 
+# EKS Managed Add-on: CloudWatch Observability (added separately to avoid circular dependency)
+resource "aws_eks_addon" "cloudwatch_observability" {
+  cluster_name                = module.eks_cluster.cluster_name
+  addon_name                  = "amazon-cloudwatch-observability"
+  service_account_role_arn    = aws_iam_role.cloudwatch_observability.arn
+  resolve_conflicts_on_create = "OVERWRITE"
+  resolve_conflicts_on_update = "OVERWRITE"
+
+  tags = var.tags
+
+  depends_on = [
+    module.eks_cluster,
+    aws_iam_role.cloudwatch_observability,
+    aws_iam_role_policy_attachment.cloudwatch_observability,
+    aws_iam_role_policy_attachment.cloudwatch_observability_xray
+  ]
+}
+
 # IAM Role for Network Flow Monitoring Agent
 resource "aws_iam_role" "network_flow_monitoring" {
   name = "${var.environment_name}-network-flow-monitoring"
@@ -94,6 +116,8 @@ resource "aws_iam_role" "network_flow_monitoring" {
   })
 
   tags = var.tags
+
+  depends_on = [module.eks_cluster]
 }
 
 resource "aws_iam_role_policy" "network_flow_monitoring" {
@@ -163,108 +187,6 @@ resource "aws_eks_addon" "network_flow_monitoring" {
 # until native AWS provider support is available. Configure via AWS Console or CLI:
 # - aws networkflowmonitor create-scope
 # - aws networkflowmonitor create-monitor
-
-# Kubecost (Self-managed via Helm - EKS Auto Mode doesn't support managed addon)
-resource "kubernetes_namespace" "kubecost" {
-  provider = kubernetes.addons
-
-  metadata {
-    name = "kubecost"
-  }
-
-  depends_on = [module.eks_cluster]
-}
-
-# Kubecost PVC for cost-analyzer
-resource "kubernetes_persistent_volume_claim" "kubecost_cost_analyzer" {
-  provider = kubernetes.addons
-
-  metadata {
-    name      = "kubecost-cost-analyzer"
-    namespace = kubernetes_namespace.kubecost.metadata[0].name
-  }
-
-  spec {
-    access_modes       = ["ReadWriteOnce"]
-    storage_class_name = "ebs-sc"
-
-    resources {
-      requests = {
-        storage = "32Gi"
-      }
-    }
-  }
-
-  depends_on = [kubernetes_namespace.kubecost]
-}
-
-# Kubecost PVC for prometheus-server
-resource "kubernetes_persistent_volume_claim" "kubecost_prometheus_server" {
-  provider = kubernetes.addons
-
-  metadata {
-    name      = "kubecost-prometheus-server"
-    namespace = kubernetes_namespace.kubecost.metadata[0].name
-  }
-
-  spec {
-    access_modes       = ["ReadWriteOnce"]
-    storage_class_name = "ebs-sc"
-
-    resources {
-      requests = {
-        storage = "32Gi"
-      }
-    }
-  }
-
-  depends_on = [kubernetes_namespace.kubecost]
-}
-
-# Kubecost Helm release
-resource "helm_release" "kubecost" {
-  name       = "kubecost"
-  repository = "https://kubecost.github.io/cost-analyzer/"
-  chart      = "cost-analyzer"
-  version    = "2.5.3"
-  namespace  = kubernetes_namespace.kubecost.metadata[0].name
-
-  # Use pre-created PVCs instead of letting Helm create them
-  set {
-    name  = "persistentVolume.enabled"
-    value = "true"
-  }
-
-  set {
-    name  = "persistentVolume.existingClaim"
-    value = kubernetes_persistent_volume_claim.kubecost_cost_analyzer.metadata[0].name
-  }
-
-  set {
-    name  = "persistentVolume.storageClass"
-    value = "ebs-sc"
-  }
-
-  set {
-    name  = "prometheus.server.persistentVolume.enabled"
-    value = "true"
-  }
-
-  set {
-    name  = "prometheus.server.persistentVolume.existingClaim"
-    value = kubernetes_persistent_volume_claim.kubecost_prometheus_server.metadata[0].name
-  }
-
-  set {
-    name  = "prometheus.server.persistentVolume.storageClass"
-    value = "ebs-sc"
-  }
-
-  depends_on = [
-    kubernetes_persistent_volume_claim.kubecost_cost_analyzer,
-    kubernetes_persistent_volume_claim.kubecost_prometheus_server
-  ]
-}
 
 # Amazon Managed Service for Prometheus Workspace
 resource "aws_prometheus_workspace" "retail_store" {
@@ -551,32 +473,6 @@ scrape_configs:
       - targets:
         - kubernetes.default.svc:443
     metrics_path: /apis/metrics.eks.amazonaws.com/v1/kcm/container/metrics
-
-  # Kubecost cost metrics
-  - job_name: kubecost
-    honor_labels: true
-    scrape_interval: 1m
-    scrape_timeout: 60s
-    metrics_path: /metrics
-    scheme: http
-    kubernetes_sd_configs:
-      - role: endpoints
-        namespaces:
-          names:
-            - kubecost
-    relabel_configs:
-      - source_labels: [__meta_kubernetes_service_name]
-        action: keep
-        regex: kubecost-cost-analyzer
-      - source_labels: [__meta_kubernetes_endpoint_port_name]
-        action: keep
-        regex: tcp-model
-      - action: labelmap
-        regex: __meta_kubernetes_service_label_(.+)
-      - source_labels: [__meta_kubernetes_namespace]
-        target_label: namespace
-      - source_labels: [__meta_kubernetes_service_name]
-        target_label: service
 EOT
 
   tags = var.tags

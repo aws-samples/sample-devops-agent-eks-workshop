@@ -1,0 +1,205 @@
+---
+# ServiceAccount with cluster-wide permissions for API stress testing
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: api-stress-test
+  namespace: default
+---
+# ClusterRole with broad permissions to make many API calls
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: api-stress-test
+rules:
+- apiGroups: ["", "apps", "batch", "networking.k8s.io", "rbac.authorization.k8s.io"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["*"]
+  resources: ["*"]
+  verbs: ["get", "list"]
+---
+# ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: api-stress-test
+subjects:
+- kind: ServiceAccount
+  name: api-stress-test
+  namespace: default
+roleRef:
+  kind: ClusterRole
+  name: api-stress-test
+  apiGroup: rbac.authorization.k8s.io
+---
+# ConfigMap with the stress test script
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: api-stress-script
+  namespace: default
+data:
+  stress.sh: |
+    #!/bin/bash
+    
+    # API Server stress test script
+    # This script floods the Kubernetes API server with requests
+    
+    NAMESPACE="stress-test-ns"
+    API_SERVER="https://kubernetes.default.svc"
+    TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+    CACERT="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+    
+    # Number of parallel workers
+    WORKERS=${WORKERS:-50}
+    # Requests per second per worker
+    RPS=${RPS:-100}
+    
+    echo "Starting API stress test with $WORKERS workers, $RPS requests/sec each"
+    echo "Target: Overwhelm API server to cause kubectl timeouts"
+    
+    # Create test namespace
+    kubectl create namespace $NAMESPACE 2>/dev/null || true
+    
+    # Function to flood with LIST requests
+    flood_list() {
+      while true; do
+        for i in $(seq 1 $RPS); do
+          # List all pods across all namespaces
+          kubectl get pods --all-namespaces -o json > /dev/null 2>&1 &
+          # List all services
+          kubectl get services --all-namespaces -o json > /dev/null 2>&1 &
+          # List all deployments
+          kubectl get deployments --all-namespaces -o json > /dev/null 2>&1 &
+          # List all configmaps
+          kubectl get configmaps --all-namespaces -o json > /dev/null 2>&1 &
+          # List all secrets
+          kubectl get secrets --all-namespaces -o json > /dev/null 2>&1 &
+          # List all nodes
+          kubectl get nodes -o json > /dev/null 2>&1 &
+          # List all namespaces
+          kubectl get namespaces -o json > /dev/null 2>&1 &
+          # List all events
+          kubectl get events --all-namespaces -o json > /dev/null 2>&1 &
+        done
+        sleep 0.1
+      done
+    }
+    
+    # Function to flood with CREATE/DELETE requests
+    flood_create_delete() {
+      local worker_id=$1
+      while true; do
+        for i in $(seq 1 20); do
+          name="stress-cm-${worker_id}-${i}-$(date +%s%N)"
+          # Create configmap
+          kubectl create configmap $name --from-literal=data=stress-test-data -n $NAMESPACE 2>/dev/null &
+        done
+        sleep 0.5
+        # Delete all stress configmaps
+        kubectl delete configmaps -n $NAMESPACE --all --wait=false 2>/dev/null &
+        sleep 0.2
+      done
+    }
+    
+    # Function to flood with GET requests using curl directly
+    flood_get_curl() {
+      while true; do
+        for i in $(seq 1 $RPS); do
+          curl -s --cacert $CACERT -H "Authorization: Bearer $TOKEN" \
+            "$API_SERVER/api/v1/pods" > /dev/null 2>&1 &
+          curl -s --cacert $CACERT -H "Authorization: Bearer $TOKEN" \
+            "$API_SERVER/api/v1/services" > /dev/null 2>&1 &
+          curl -s --cacert $CACERT -H "Authorization: Bearer $TOKEN" \
+            "$API_SERVER/api/v1/namespaces" > /dev/null 2>&1 &
+          curl -s --cacert $CACERT -H "Authorization: Bearer $TOKEN" \
+            "$API_SERVER/apis/apps/v1/deployments" > /dev/null 2>&1 &
+        done
+        sleep 0.05
+      done
+    }
+    
+    # Function for aggressive watch connections
+    flood_watch() {
+      while true; do
+        for i in $(seq 1 20); do
+          kubectl get pods --all-namespaces -w > /dev/null 2>&1 &
+          kubectl get events --all-namespaces -w > /dev/null 2>&1 &
+          kubectl get services --all-namespaces -w > /dev/null 2>&1 &
+        done
+        sleep 5
+        # Kill old watch processes to prevent memory issues
+        pkill -f "kubectl.*-w" 2>/dev/null || true
+      done
+    }
+    
+    echo "Launching $WORKERS LIST flood workers..."
+    for i in $(seq 1 $WORKERS); do
+      flood_list &
+    done
+    
+    echo "Launching $((WORKERS/2)) CREATE/DELETE flood workers..."
+    for i in $(seq 1 $((WORKERS/2))); do
+      flood_create_delete $i &
+    done
+    
+    echo "Launching $((WORKERS/2)) direct curl GET flood workers..."
+    for i in $(seq 1 $((WORKERS/2))); do
+      flood_get_curl &
+    done
+    
+    echo "Launching 10 WATCH flood workers..."
+    for i in $(seq 1 10); do
+      flood_watch &
+    done
+    
+    echo "API stress test running. Press Ctrl+C to stop."
+    echo "Monitor with: kubectl get --raw /metrics | grep apiserver_request"
+    
+    # Keep the script running
+    wait
+---
+# Deployment with multiple replicas for maximum impact
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-stress-test
+  namespace: default
+  labels:
+    app: api-stress-test
+spec:
+  replicas: 5  # Multiple replicas to multiply the load
+  selector:
+    matchLabels:
+      app: api-stress-test
+  template:
+    metadata:
+      labels:
+        app: api-stress-test
+    spec:
+      serviceAccountName: api-stress-test
+      containers:
+      - name: stress
+        image: bitnami/kubectl:latest
+        command: ["/bin/bash", "/scripts/stress.sh"]
+        env:
+        - name: WORKERS
+          value: "50"  # 50 parallel workers per pod
+        - name: RPS
+          value: "100"  # 100 requests per second per worker
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "512Mi"
+          limits:
+            cpu: "2000m"
+            memory: "2Gi"
+        volumeMounts:
+        - name: script
+          mountPath: /scripts
+      volumes:
+      - name: script
+        configMap:
+          name: api-stress-script
+          defaultMode: 0755

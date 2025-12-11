@@ -1,0 +1,32 @@
+{
+    "SecurityGroups": [
+        {
+            "GroupId": "sg-0c6f37edee735b5bd",
+            "IpPermissionsEgress": [],
+            "Tags": [
+                {
+                    "Key": "environment-name",
+                    "Value": "retail-store"
+                },
+                {
+                    "Key": "Name",
+                    "Value": "retail-store-orders"
+                },
+                {
+                    "Key": "created-by",
+                    "Value": "retail-store-sample-app"
+                },
+                {
+                    "Key": "devopsagent",
+                    "Value": "true"
+                }
+            ],
+            "VpcId": "vpc-0999a334106bfe2c4",
+            "SecurityGroupArn": "arn:aws:ec2:us-east-1:466162272783:security-group/sg-0c6f37edee735b5bd",
+            "OwnerId": "466162272783",
+            "GroupName": "retail-store-orders-20251208202044992800000016",
+            "Description": "Control traffic to/from RDS Aurora retail-store-orders",
+            "IpPermissions": []
+        }
+    ]
+}

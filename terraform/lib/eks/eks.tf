@@ -96,24 +96,8 @@ module "eks_cluster" {
   authentication_mode = "API_AND_CONFIG_MAP"
 
   # Access entries for user and role
+  # Note: cluster creator (kulkshya) automatically gets access via enable_cluster_creator_admin_permissions
   access_entries = {
-    kulkshya = {
-      principal_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:user/kulkshya"
-      policy_associations = {
-        admin = {
-          policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSAdminPolicy"
-          access_scope = {
-            type = "cluster"
-          }
-        }
-        cluster_admin = {
-          policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
-          access_scope = {
-            type = "cluster"
-          }
-        }
-      }
-    }
     Administrator = {
       principal_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/Administrator"
       policy_associations = {
@@ -140,17 +124,12 @@ module "eks_cluster" {
     node_role_arn = aws_iam_role.eks_auto_node.arn
   }
 
-
-
   # Disable self-managed addons for Auto Mode
   bootstrap_self_managed_addons = false
 
-  # Auto Mode handles these - only keep observability addons
+  # Auto Mode handles these - only keep metrics-server addon
+  # CloudWatch observability addon is added separately to avoid circular dependency
   cluster_addons = {
-    amazon-cloudwatch-observability = {
-      most_recent              = true
-      service_account_role_arn = aws_iam_role.cloudwatch_observability.arn
-    }
     metrics-server = {
       most_recent = true
     }
@@ -213,6 +192,27 @@ resource "null_resource" "cluster_blocker" {
 resource "null_resource" "addons_blocker" {
   depends_on = [
     time_sleep.addons,
-    aws_eks_addon.adot
+    aws_eks_addon.adot,
+    aws_eks_addon.cloudwatch_observability
+  ]
+}
+
+# Enable Network Policy Controller for EKS Auto Mode
+# This ConfigMap enables the VPC CNI network policy controller on Auto Mode nodes
+# Reference: https://docs.aws.amazon.com/eks/latest/userguide/auto-net-pol.html
+resource "kubernetes_config_map" "network_policy_controller" {
+  provider = kubernetes.cluster
+
+  metadata {
+    name      = "amazon-vpc-cni"
+    namespace = "kube-system"
+  }
+
+  data = {
+    "enable-network-policy-controller" = "true"
+  }
+
+  depends_on = [
+    module.eks_cluster
   ]
 }

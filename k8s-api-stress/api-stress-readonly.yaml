@@ -1,0 +1,128 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: api-stress-test
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: api-stress-reader
+  namespace: api-stress-test
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: api-stress-reader
+rules:
+- apiGroups: ["", "apps", "batch", "networking.k8s.io", "rbac.authorization.k8s.io"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apiextensions.k8s.io"]
+  resources: ["customresourcedefinitions"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: api-stress-reader
+subjects:
+- kind: ServiceAccount
+  name: api-stress-reader
+  namespace: api-stress-test
+roleRef:
+  kind: ClusterRole
+  name: api-stress-reader
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: stress-script
+  namespace: api-stress-test
+data:
+  stress.sh: |
+    #!/bin/sh
+    set -e
+    
+    TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+    CACERT=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+    API_SERVER="https://kubernetes.default.svc"
+    
+    # Number of parallel workers
+    WORKERS=${WORKERS:-50}
+    # Requests per worker per second
+    RPS=${RPS:-100}
+    
+    echo "Starting API stress test with $WORKERS workers, $RPS requests/worker/sec"
+    echo "This will generate approximately $((WORKERS * RPS)) read requests per second"
+    
+    stress_worker() {
+      worker_id=$1
+      while true; do
+        for i in $(seq 1 $RPS); do
+          # Rotate through different read-only API calls
+          case $((i % 10)) in
+            0) curl -s -k --cacert $CACERT -H "Authorization: Bearer $TOKEN" "$API_SERVER/api/v1/pods?limit=500" > /dev/null & ;;
+            1) curl -s -k --cacert $CACERT -H "Authorization: Bearer $TOKEN" "$API_SERVER/api/v1/namespaces" > /dev/null & ;;
+            2) curl -s -k --cacert $CACERT -H "Authorization: Bearer $TOKEN" "$API_SERVER/api/v1/services?limit=500" > /dev/null & ;;
+            3) curl -s -k --cacert $CACERT -H "Authorization: Bearer $TOKEN" "$API_SERVER/api/v1/configmaps?limit=500" > /dev/null & ;;
+            4) curl -s -k --cacert $CACERT -H "Authorization: Bearer $TOKEN" "$API_SERVER/api/v1/secrets?limit=500" > /dev/null & ;;
+            5) curl -s -k --cacert $CACERT -H "Authorization: Bearer $TOKEN" "$API_SERVER/apis/apps/v1/deployments?limit=500" > /dev/null & ;;
+            6) curl -s -k --cacert $CACERT -H "Authorization: Bearer $TOKEN" "$API_SERVER/apis/apps/v1/replicasets?limit=500" > /dev/null & ;;
+            7) curl -s -k --cacert $CACERT -H "Authorization: Bearer $TOKEN" "$API_SERVER/api/v1/nodes" > /dev/null & ;;
+            8) curl -s -k --cacert $CACERT -H "Authorization: Bearer $TOKEN" "$API_SERVER/api/v1/endpoints?limit=500" > /dev/null & ;;
+            9) curl -s -k --cacert $CACERT -H "Authorization: Bearer $TOKEN" "$API_SERVER/api/v1/events?limit=500" > /dev/null & ;;
+          esac
+        done
+        sleep 1
+      done
+    }
+    
+    # Launch workers
+    for w in $(seq 1 $WORKERS); do
+      stress_worker $w &
+    done
+    
+    echo "All workers launched. Press Ctrl+C to stop."
+    wait
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-stress-reader
+  namespace: api-stress-test
+spec:
+  replicas: 10
+  selector:
+    matchLabels:
+      app: api-stress-reader
+  template:
+    metadata:
+      labels:
+        app: api-stress-reader
+    spec:
+      serviceAccountName: api-stress-reader
+      containers:
+      - name: stress
+        image: curlimages/curl:latest
+        command: ["/bin/sh", "/scripts/stress.sh"]
+        env:
+        - name: WORKERS
+          value: "50"
+        - name: RPS
+          value: "100"
+        volumeMounts:
+        - name: stress-script
+          mountPath: /scripts
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "256Mi"
+          limits:
+            cpu: "1"
+            memory: "512Mi"
+      volumes:
+      - name: stress-script
+        configMap:
+          name: stress-script
+          defaultMode: 0755
