@@ -11,9 +11,15 @@ variable "istio_enabled" {
 }
 
 variable "opentelemetry_enabled" {
-  description = "Boolean value that enables OpenTelemetry."
+  description = "Boolean value that enables OpenTelemetry (ADOT)."
   type        = bool
   default     = false
+}
+
+variable "application_signals_enabled" {
+  description = "Boolean value that enables CloudWatch Application Signals auto-instrumentation."
+  type        = bool
+  default     = true
 }
 
 variable "container_image_overrides" {

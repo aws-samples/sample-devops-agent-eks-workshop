@@ -22,6 +22,12 @@ opentelemetry:
   instrumentation: ${opentelemetry_instrumentation}
 %{ endif }
 
+%{ if application_signals_enabled }
+# CloudWatch Application Signals auto-instrumentation (Java)
+podAnnotations:
+  instrumentation.opentelemetry.io/inject-java: "true"
+%{ endif }
+
 %{ if istio_enabled }
 istio:
   enabled: true

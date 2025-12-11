@@ -32,6 +32,13 @@ module "vpc" {
   manage_default_security_group = true
   default_security_group_tags   = { Name = "${var.environment_name}-default" }
 
+  # VPC Flow Logs
+  enable_flow_log                      = true
+  create_flow_log_cloudwatch_log_group = true
+  create_flow_log_cloudwatch_iam_role  = true
+  flow_log_max_aggregation_interval    = 60
+  flow_log_cloudwatch_log_group_retention_in_days = 30
+
   public_subnet_tags  = merge(var.tags, var.public_subnet_tags)
   private_subnet_tags = merge(var.tags, var.private_subnet_tags)
 

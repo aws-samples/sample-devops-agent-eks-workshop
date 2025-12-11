@@ -92,30 +92,15 @@ module "eks_cluster" {
   create_iam_role = false
   iam_role_arn    = aws_iam_role.eks_auto_cluster.arn
 
+  # Enable all control plane logging including controller and scheduler
+  cluster_enabled_log_types = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
+
   # Access configuration - API_AND_CONFIG_MAP mode
   authentication_mode = "API_AND_CONFIG_MAP"
 
-  # Access entries for user and role
-  # Note: cluster creator (kulkshya) automatically gets access via enable_cluster_creator_admin_permissions
-  access_entries = {
-    Administrator = {
-      principal_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/Administrator"
-      policy_associations = {
-        admin = {
-          policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSAdminPolicy"
-          access_scope = {
-            type = "cluster"
-          }
-        }
-        cluster_admin = {
-          policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
-          access_scope = {
-            type = "cluster"
-          }
-        }
-      }
-    }
-  }
+  # Access entries managed via AWS Console
+  # Note: cluster creator automatically gets access via enable_cluster_creator_admin_permissions
+  access_entries = {}
 
   # EKS Auto Mode configuration
   cluster_compute_config = {

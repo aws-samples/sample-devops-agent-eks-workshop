@@ -50,6 +50,18 @@ resource "aws_eks_addon" "kube_state_metrics" {
   depends_on = [module.eks_cluster]
 }
 
+# EKS Managed Add-on: prometheus-node-exporter
+resource "aws_eks_addon" "prometheus_node_exporter" {
+  cluster_name                = module.eks_cluster.cluster_name
+  addon_name                  = "prometheus-node-exporter"
+  resolve_conflicts_on_create = "OVERWRITE"
+  resolve_conflicts_on_update = "OVERWRITE"
+
+  tags = var.tags
+
+  depends_on = [module.eks_cluster]
+}
+
 # EKS Managed Add-on: EFS CSI Driver
 resource "aws_eks_addon" "efs_csi_driver" {
   cluster_name                = module.eks_cluster.cluster_name
@@ -74,13 +86,41 @@ resource "aws_eks_addon" "secrets_store_csi_driver" {
   depends_on = [module.eks_cluster]
 }
 
-# EKS Managed Add-on: CloudWatch Observability (added separately to avoid circular dependency)
+# EKS Managed Add-on: CloudWatch Observability
+# Enables Container Insights with enhanced observability and Application Signals for APM
+# Application Signals supports Java, Python, Node.js, and .NET auto-instrumentation
+# Note: Catalog service is Go - Application Signals doesn't support Go auto-instrumentation
 resource "aws_eks_addon" "cloudwatch_observability" {
   cluster_name                = module.eks_cluster.cluster_name
   addon_name                  = "amazon-cloudwatch-observability"
+  addon_version               = "v4.7.0-eksbuild.1"
   service_account_role_arn    = aws_iam_role.cloudwatch_observability.arn
   resolve_conflicts_on_create = "OVERWRITE"
   resolve_conflicts_on_update = "OVERWRITE"
+
+  # Application Signals configuration
+  # The add-on webhook will auto-inject instrumentation when pods have the annotation:
+  #   instrumentation.opentelemetry.io/inject-java: "true"
+  #   instrumentation.opentelemetry.io/inject-nodejs: "true"
+  configuration_values = jsonencode({
+    agent = {
+      config = {
+        logs = {
+          metrics_collected = {
+            application_signals = {}
+            kubernetes = {
+              enhanced_container_insights = true
+            }
+          }
+        }
+        traces = {
+          traces_collected = {
+            application_signals = {}
+          }
+        }
+      }
+    }
+  })
 
   tags = var.tags
 
