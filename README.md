@@ -46,10 +46,10 @@ The Retail Store Sample App is a deliberately over-engineered e-commerce applica
 └───────┼──────────────┼──────────────┼──────────────┼──────────────────┼──────────┘
         │              │              │              │                  │
         ▼              ▼              ▼              ▼                  ▼
-   ┌─────────┐   ┌───────────┐  ┌──────────┐  ┌───────────┐      ┌───────────┐
-   │   ALB   │   │Aurora MySQL│  │ DynamoDB │  │Aurora     │      │ElastiCache│
-   │         │   │ (Catalog) │  │ (Carts)  │  │PostgreSQL │      │  (Redis)  │
-   └─────────┘   └───────────┘  └──────────┘  │ (Orders)  │      └───────────┘
+  ┌──────────┐   ┌───────────┐  ┌──────────┐  ┌───────────┐      ┌───────────┐
+  │ClusterIP │   │Aurora MySQL│  │ DynamoDB │  │Aurora     │      │ElastiCache│
+  │(Port-Fwd)│   │ (Catalog) │  │ (Carts)  │  │PostgreSQL │      │  (Redis)  │
+  └──────────┘   └───────────┘  └──────────┘  │ (Orders)  │      └───────────┘
                                               └─────┬─────┘
                                                     │
                                               ┌─────▼─────┐
@@ -57,6 +57,8 @@ The Retail Store Sample App is a deliberately over-engineered e-commerce applica
                                               │(Amazon MQ)│
                                               └───────────┘
 ```
+
+> **Note:** The UI service uses a ClusterIP service type (not a public ALB). To access the application, use `kubectl port-forward svc/ui 8080:80 -n ui` and open http://localhost:8080 in your browser. This approach is intentional for lab/demo environments to avoid exposing the application publicly.
 
 ### Microservice Components
 
@@ -179,11 +181,44 @@ Container Insights provides enhanced observability for EKS clusters with the fol
 - Service dependency visualization
 - SLO monitoring and alerting
 
+**Container Logs Collection:**
+
+Container logs from all pods are automatically collected by Fluent Bit and sent to CloudWatch Logs. The logs are organized into the following log groups:
+
+| Log Group | Description |
+|-----------|-------------|
+| `/aws/containerinsights/retail-store/application` | Application container logs (stdout/stderr) from all pods |
+| `/aws/containerinsights/retail-store/dataplane` | Kubernetes dataplane component logs |
+| `/aws/containerinsights/retail-store/host` | Node-level host logs |
+| `/aws/containerinsights/retail-store/performance` | Performance metrics in log format |
+
+**Viewing Container Logs:**
+```bash
+# View recent logs for a specific service using CloudWatch Logs Insights
+aws logs start-query \
+  --log-group-name "/aws/containerinsights/retail-store/application" \
+  --start-time $(date -d '1 hour ago' +%s) \
+  --end-time $(date +%s) \
+  --query-string 'fields @timestamp, @message | filter kubernetes.namespace_name = "catalog" | sort @timestamp desc | limit 50'
+
+# Or use kubectl for real-time logs
+kubectl logs -n catalog -l app.kubernetes.io/name=catalog --tail=100 -f
+```
+
+**Log Structure:**
+Each log entry includes Kubernetes metadata for easy filtering:
+- `kubernetes.pod_name` - Pod name
+- `kubernetes.namespace_name` - Namespace
+- `kubernetes.container_name` - Container name
+- `kubernetes.host` - Node instance ID
+- `log_processed` - Parsed JSON log content (if applicable)
+
 **Access Container Insights:**
 1. Open [CloudWatch Console](https://console.aws.amazon.com/cloudwatch)
 2. Navigate to **Container Insights** → **Performance monitoring**
 3. Select your EKS cluster from the dropdown
 4. Explore metrics by: Cluster, Namespace, Service, Pod, or Container
+5. For logs, navigate to **Logs** → **Log groups** → `/aws/containerinsights/retail-store/application`
 
 #### Amazon Managed Prometheus (AMP)
 

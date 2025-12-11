@@ -120,6 +120,9 @@ resource "aws_eks_addon" "cloudwatch_observability" {
         }
       }
     }
+    containerLogs = {
+      enabled = true
+    }
   })
 
   tags = var.tags

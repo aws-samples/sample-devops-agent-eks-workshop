@@ -95,6 +95,9 @@ module "eks_cluster" {
   # Enable all control plane logging including controller and scheduler
   cluster_enabled_log_types = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
 
+  # Tags for CloudWatch log group
+  cloudwatch_log_group_tags = var.tags
+
   # Access configuration - API_AND_CONFIG_MAP mode
   authentication_mode = "API_AND_CONFIG_MAP"
 
