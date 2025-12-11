@@ -1192,6 +1192,16 @@ kubectl logs -n catalog -l app.kubernetes.io/name=catalog -c latency-injector
 ./fault-injection/rollback-catalog.sh
 ```
 
+**DevOps Agent Investigation Prompts:**
+
+Use these prompts when starting an investigation in the AWS DevOps Agent web app:
+
+> **Investigation Details:**
+> Investigate latency degradation in the Catalog microservice (Go) running in the `catalog` namespace. Users report slow product page loads. Analyze CloudWatch Container Insights and Prometheus metrics for p99 latency spikes in the catalog service. Correlate with CPU throttling metrics as CPU limits may have been reduced. Check application logs for timeout errors from dependent services (UI calling Catalog). Review X-Ray traces for the `/products` endpoint to identify where latency is introduced. Goal: Identify root cause of 300-500ms added latency and CPU resource constraints affecting Catalog service performance.
+
+> **Investigation Starting Point:**
+> Start by analyzing Prometheus metrics for the catalog namespace: `histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{namespace="catalog"}[5m]))`. Check CloudWatch Container Insights for CPU throttling on catalog pods. Review X-Ray service map for latency between UI→Catalog calls. Examine pod resource limits via `kube_pod_container_resource_limits` metrics.
+
 ---
 
 ### 2. RDS Database Stress Test
@@ -1223,6 +1233,14 @@ kubectl logs -f rds-stress-test -n orders
 # Rollback
 ./fault-injection/rollback-rds-stress.sh
 ```
+
+**DevOps Agent Investigation Prompts:**
+
+> **Investigation Details:**
+> Investigate database performance degradation affecting the Orders service. Users report checkout failures and order submission timeouts. Analyze Amazon RDS Performance Insights for the `retail-store-orders` PostgreSQL cluster to identify CPU utilization spikes (70-100%), slow queries, and lock wait events (LWLock, Lock:transactionid). Correlate CloudWatch RDS metrics (CPUUtilization, DatabaseConnections, ReadLatency, WriteLatency) with application errors. Check Orders and Checkout pod logs for database-related exceptions. Goal: Identify root cause of RDS stress causing service degradation.
+
+> **Investigation Starting Point:**
+> Start with RDS Performance Insights for the orders PostgreSQL cluster. Analyze CloudWatch metrics: `AWS/RDS CPUUtilization`, `DatabaseConnections`, `WriteLatency`. Check for active lock waits and slow query patterns. Correlate with pod logs in the `orders` namespace for JDBC connection errors. Review kube-state-metrics for orders deployment health.
 
 ---
 
@@ -1258,6 +1276,14 @@ kubectl run test-from-default --rm -it --image=curlimages/curl --restart=Never -
 ./fault-injection/rollback-network-partition.sh
 ```
 
+**DevOps Agent Investigation Prompts:**
+
+> **Investigation Details:**
+> Investigate intermittent failures in cart operations. Users can browse products but "Add to Cart" and cart view operations fail with timeouts. Analyze network connectivity between UI service (namespace: ui) and Carts service (namespace: carts). Check for Kubernetes NetworkPolicy resources that may be blocking traffic. Review ALB access logs for 504 Gateway Timeout errors on cart-related endpoints. Correlate CloudWatch Container Insights network metrics and Network Flow Monitor for traffic patterns between namespaces. Goal: Identify network partition or policy blocking UI→Cart communication.
+
+> **Investigation Starting Point:**
+> Start by checking Kubernetes NetworkPolicy resources in the `carts` namespace. Analyze Network Flow Monitor for blocked traffic between ui and carts namespaces. Review UI pod logs for timeout errors calling cart service. Check ALB target group health for carts service. Examine VPC Flow Logs for REJECT entries between pod CIDR ranges.
+
 ---
 
 ### 4. RDS Security Group Misconfiguration
@@ -1287,6 +1313,14 @@ kubectl logs -n checkout -l app.kubernetes.io/name=checkout --tail=20
 # Rollback
 ./fault-injection/rollback-rds-sg-block.sh
 ```
+
+**DevOps Agent Investigation Prompts:**
+
+> **Investigation Details:**
+> Investigate complete database connectivity failure for Orders and Checkout services. Application returns 500/502/504 errors. RDS instance shows healthy in AWS Console but applications cannot connect. Analyze VPC Flow Logs for REJECT entries on port 5432 traffic from EKS node security group to RDS security group. Check EC2 Security Group rules for the RDS instance to verify EKS cluster ingress is allowed. Review Orders and Checkout pod logs for "Connection timed out" errors. Goal: Identify security group misconfiguration blocking EKS→RDS connectivity on PostgreSQL port 5432.
+
+> **Investigation Starting Point:**
+> Start by analyzing VPC Flow Logs filtered for port 5432 and REJECT action. Check RDS security group inbound rules for missing EKS cluster security group reference. Review CloudWatch RDS metric `DatabaseConnections` for sudden drop to zero. Examine Orders pod logs for JDBC connection timeout errors. Verify RDS instance status is "available" but connections are failing.
 
 ---
 
@@ -1323,6 +1357,14 @@ kubectl describe pod -n carts -l app.kubernetes.io/name=carts | grep -A5 'Last S
 ./fault-injection/rollback-cart-memory-leak.sh
 ```
 
+**DevOps Agent Investigation Prompts:**
+
+> **Investigation Details:**
+> Investigate Cart service instability with pods repeatedly restarting. Users experience intermittent cart failures. Analyze Kubernetes events for OOMKilled termination reasons in the `carts` namespace. Check CloudWatch Container Insights and Prometheus metrics for memory usage growth pattern (`container_memory_usage_bytes`) approaching limits. Review kube-state-metrics for `kube_pod_container_status_restarts_total` increases. Examine pod describe output for Last State showing OOMKilled. Goal: Identify memory leak causing OOMKill and CrashLoopBackOff in Cart service.
+
+> **Investigation Starting Point:**
+> Start by checking pod status in carts namespace for CrashLoopBackOff or OOMKilled states. Analyze Prometheus metric `container_memory_usage_bytes{namespace="carts"}` for growth pattern. Review Kubernetes events: `kubectl get events -n carts --sort-by='.lastTimestamp'`. Check `kube_pod_container_status_restarts_total` for restart count. Examine pod spec for memory limits and any sidecar containers.
+
 ---
 
 ### 6. DynamoDB Latency
@@ -1354,6 +1396,14 @@ kubectl logs -n carts -l app.kubernetes.io/name=carts -c dynamodb-latency-inject
 # Rollback
 ./fault-injection/rollback-dynamodb-latency.sh
 ```
+
+**DevOps Agent Investigation Prompts:**
+
+> **Investigation Details:**
+> Investigate slow cart operations affecting user experience. Add to cart, view cart, and checkout operations are taking 500ms+ longer than normal. Analyze CloudWatch DynamoDB metrics for the `retail-store-carts` table: `SuccessfulRequestLatency`, `ThrottledRequests`, `ConsumedReadCapacityUnits`. Check Cart service (Java) pod logs for increased response times and thread queuing. Review Prometheus metrics for p99 latency spikes in cart service endpoints. Correlate X-Ray traces showing DynamoDB SDK calls with elevated latency. Goal: Identify root cause of artificial latency affecting DynamoDB calls from Cart service.
+
+> **Investigation Starting Point:**
+> Start by analyzing CloudWatch DynamoDB metrics for `retail-store-carts` table: `SuccessfulRequestLatency`, `GetItem.Latency`, `PutItem.Latency`. Check X-Ray traces for DynamoDB SDK call durations. Review Cart pod logs for slow operation warnings. Examine Prometheus histogram `http_request_duration_seconds_bucket{namespace="carts"}` for latency distribution.
 
 ---
 
