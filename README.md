@@ -1037,11 +1037,13 @@ kubectl logs -n catalog -l app.kubernetes.io/name=catalog -c latency-injector
 ./fault-injection/rollback-catalog.sh
 ```
 
-**DevOps Agent Investigation Prompt:**
+**DevOps Agent Investigation Prompts:**
 
-Use this prompt when starting an investigation in the AWS DevOps Agent web app:
+Use these prompts when starting an investigation in the AWS DevOps Agent web app:
 
-> "The product pages are loading really slow. Can you check what's going on with the catalog service?"
+> **Investigation Details:** "Product pages are loading slow. Users are complaining about the catalog taking forever to load. Started happening about 10 minutes ago."
+
+> **Investigation Starting Point:** "Check the catalog service pods in the catalog namespace. Look at latency metrics and CPU usage."
 
 ---
 
@@ -1075,9 +1077,11 @@ kubectl logs -f rds-stress-test -n orders
 ./fault-injection/rollback-rds-stress.sh
 ```
 
-**DevOps Agent Investigation Prompt:**
+**DevOps Agent Investigation Prompts:**
 
-> "Checkout is failing for customers. I think it might be a database issue with the orders service."
+> **Investigation Details:** "Checkout is failing for customers. Orders aren't going through and we're seeing timeouts. Might be a database issue."
+
+> **Investigation Starting Point:** "Check the orders service and the RDS PostgreSQL database. Look at Performance Insights for slow queries."
 
 ---
 
@@ -1113,9 +1117,11 @@ kubectl run test-from-default --rm -it --image=curlimages/curl --restart=Never -
 ./fault-injection/rollback-network-partition.sh
 ```
 
-**DevOps Agent Investigation Prompt:**
+**DevOps Agent Investigation Prompts:**
 
-> "Users can browse products but the Add to Cart button isn't working. Getting timeout errors."
+> **Investigation Details:** "Users can browse products fine but Add to Cart is broken. Getting timeout errors when trying to add items. Cart page also won't load."
+
+> **Investigation Starting Point:** "Check connectivity between the UI service and the carts service. Look for network policies or blocked traffic."
 
 ---
 
@@ -1147,9 +1153,11 @@ kubectl logs -n checkout -l app.kubernetes.io/name=checkout --tail=20
 ./fault-injection/rollback-rds-sg-block.sh
 ```
 
-**DevOps Agent Investigation Prompt:**
+**DevOps Agent Investigation Prompts:**
 
-> "Orders and checkout are completely down. Getting 500 errors but RDS looks healthy in the console."
+> **Investigation Details:** "Orders and checkout are completely down. Getting 500 errors. RDS shows healthy in the console but apps can't seem to connect."
+
+> **Investigation Starting Point:** "Check the RDS security groups and VPC flow logs. The database is up but something is blocking connections."
 
 ---
 
@@ -1186,9 +1194,11 @@ kubectl describe pod -n carts -l app.kubernetes.io/name=carts | grep -A5 'Last S
 ./fault-injection/rollback-cart-memory-leak.sh
 ```
 
-**DevOps Agent Investigation Prompt:**
+**DevOps Agent Investigation Prompts:**
 
-> "The cart service pods keep restarting. Can you figure out why?"
+> **Investigation Details:** "Cart service pods keep restarting every few minutes. Users are seeing intermittent failures when using the cart."
+
+> **Investigation Starting Point:** "Check the carts namespace for pod restarts and OOMKilled events. Look at memory usage patterns."
 
 ---
 
@@ -1222,9 +1232,11 @@ kubectl logs -n carts -l app.kubernetes.io/name=carts -c dynamodb-latency-inject
 ./fault-injection/rollback-dynamodb-latency.sh
 ```
 
-**DevOps Agent Investigation Prompt:**
+**DevOps Agent Investigation Prompts:**
 
-> "Adding items to cart is super slow. It used to be instant but now takes several seconds."
+> **Investigation Details:** "Adding items to cart is super slow. Used to be instant but now takes 3-5 seconds. Checkout is also sluggish."
+
+> **Investigation Starting Point:** "Check DynamoDB metrics for the carts table. Look at latency and any throttling. Also check the cart service pods."
 
 ---
 
@@ -1526,14 +1538,14 @@ From the Operator Web App:
 
 After injecting a fault using the scripts in the [Fault Injection Scenarios](#fault-injection-scenarios) section, use these prompts to start a DevOps Agent investigation:
 
-| Scenario | Investigation Prompt |
-|----------|---------------------|
-| [Catalog Latency](#1-catalog-service-latency-injection) | "The product pages are loading really slow. Can you check what's going on with the catalog service?" |
-| [RDS Stress Test](#2-rds-database-stress-test) | "Checkout is failing for customers. I think it might be a database issue with the orders service." |
-| [Network Partition](#3-network-partition-ui--cart) | "Users can browse products but the Add to Cart button isn't working. Getting timeout errors." |
-| [RDS Security Group Block](#4-rds-security-group-misconfiguration) | "Orders and checkout are completely down. Getting 500 errors but RDS looks healthy in the console." |
-| [Cart Memory Leak](#5-cart-memory-leak) | "The cart service pods keep restarting. Can you figure out why?" |
-| [DynamoDB Latency](#6-dynamodb-latency) | "Adding items to cart is super slow. It used to be instant but now takes several seconds." |
+| Scenario | Investigation Details | Investigation Starting Point |
+|----------|----------------------|------------------------------|
+| [Catalog Latency](#1-catalog-service-latency-injection) | "Product pages are loading slow. Users are complaining about the catalog taking forever to load." | "Check the catalog service pods in the catalog namespace. Look at latency metrics and CPU usage." |
+| [RDS Stress Test](#2-rds-database-stress-test) | "Checkout is failing for customers. Orders aren't going through and we're seeing timeouts." | "Check the orders service and the RDS PostgreSQL database. Look at Performance Insights for slow queries." |
+| [Network Partition](#3-network-partition-ui--cart) | "Users can browse products fine but Add to Cart is broken. Getting timeout errors." | "Check connectivity between the UI service and the carts service. Look for network policies or blocked traffic." |
+| [RDS Security Group Block](#4-rds-security-group-misconfiguration) | "Orders and checkout are completely down. Getting 500 errors. RDS shows healthy but apps can't connect." | "Check the RDS security groups and VPC flow logs. The database is up but something is blocking connections." |
+| [Cart Memory Leak](#5-cart-memory-leak) | "Cart service pods keep restarting every few minutes. Users are seeing intermittent failures." | "Check the carts namespace for pod restarts and OOMKilled events. Look at memory usage patterns." |
+| [DynamoDB Latency](#6-dynamodb-latency) | "Adding items to cart is super slow. Used to be instant but now takes 3-5 seconds." | "Check DynamoDB metrics for the carts table. Look at latency and any throttling." |
 
 **Investigation Flow:**
 
