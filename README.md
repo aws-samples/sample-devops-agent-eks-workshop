@@ -20,6 +20,11 @@
   - [Deploy the Full EKS Version](#deploy-the-full-eks-version)
   - [Configure kubectl Access](#configure-kubectl-access)
 - [Application Access](#application-access-ui-service)
+- [AWS DevOps Agent Integration](#aws-devops-agent-integration)
+  - [Create an Agent Space](#create-an-agent-space)
+  - [Configure EKS Access](#configure-eks-access-for-devops-agent-required)
+  - [View Topology Graph](#view-topology-graph)
+  - [Start an Investigation](#start-an-investigation)
 - [Fault Injection Scenarios](#fault-injection-scenarios)
   - [Catalog Service Latency](#1-catalog-service-latency-injection)
   - [RDS Database Stress Test](#2-rds-database-stress-test)
@@ -27,7 +32,6 @@
   - [RDS Security Group Block](#4-rds-security-group-misconfiguration)
   - [Cart Memory Leak](#5-cart-memory-leak)
   - [DynamoDB Latency](#6-dynamodb-latency)
-- [AWS DevOps Agent Integration](#aws-devops-agent-integration)
 - [Cleanup](#cleanup)
 
 ---
@@ -998,6 +1002,431 @@ kubectl get networkpolicies -n ui
 | `timeout` | Network/firewall issue | Check VPN, firewall, or security groups |
 | `unauthorized` | kubectl not configured | Run `aws eks update-kubeconfig` again |
 
+## AWS DevOps Agent Integration
+
+AWS DevOps Agent is a frontier AI agent that helps accelerate incident response and improve system reliability. It automatically correlates data across your operational toolchain, identifies probable root causes, and recommends targeted mitigations. This section provides step-by-step guidance for integrating the DevOps Agent with your EKS-based Retail Store deployment.
+
+> **Note:** AWS DevOps Agent is currently in **public preview** and available in the **US East (N. Virginia) Region** (`us-east-1`). While the agent runs in `us-east-1`, it can monitor applications deployed in any AWS Region.
+
+### Create an Agent Space
+
+An **Agent Space** defines the scope of what AWS DevOps Agent can access as it performs tasks. Think of it as a logical boundary that groups related resources, applications, and infrastructure for investigation purposes.
+
+#### Organizing Your Agent Space
+
+You can organize Agent Spaces based on your operational model:
+- **Per Application** - One Agent Space per application (recommended for this lab)
+- **Per Team** - One Agent Space per on-call team managing multiple services
+- **Centralized** - Single Agent Space for the entire organization
+
+For this lab, we'll create an Agent Space specifically for the Retail Store application.
+
+#### Step-by-Step: Create an Agent Space
+
+1. **Navigate to AWS DevOps Agent Console**
+   ```
+   https://console.aws.amazon.com/devops-agent/home?region=us-east-1
+   ```
+
+2. **Create the Agent Space**
+   - Click **Create Agent Space**
+   - Enter a name: `retail-store-lab` (or your preferred name)
+   - Optionally add a description: "Agent Space for AWS Retail Store Sample Application on EKS"
+
+3. **Configure IAM Roles**
+   
+   The console will guide you to create the required IAM roles. AWS DevOps Agent needs permissions to:
+   - Introspect AWS resources in your account(s)
+   - Access CloudWatch metrics and logs
+   - Query X-Ray traces
+   - Read EKS cluster information
+   
+   The agent creates two IAM roles:
+   - **AgentSpace Execution Role** - Used by the agent to perform investigations
+   - **Cross-Account Role** (optional) - For monitoring resources in other AWS accounts
+
+4. **Enable the Web App**
+   - Check the option to **Enable AWS DevOps Agent web app**
+   - This provides a web interface for operators to trigger and monitor investigations
+
+5. **Click Create**
+   - Wait for the Agent Space to be created (typically 1-2 minutes)
+
+#### Required IAM Permissions
+
+The IAM role created for the Agent Space requires the following permissions:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "cloudwatch:GetMetricData",
+        "cloudwatch:GetMetricStatistics",
+        "cloudwatch:ListMetrics",
+        "cloudwatch:DescribeAlarms",
+        "logs:GetLogEvents",
+        "logs:FilterLogEvents",
+        "logs:DescribeLogGroups",
+        "logs:DescribeLogStreams",
+        "xray:GetTraceSummaries",
+        "xray:BatchGetTraces",
+        "eks:DescribeCluster",
+        "eks:ListClusters",
+        "eks:ListNodegroups",
+        "eks:DescribeNodegroup",
+        "ec2:DescribeInstances",
+        "ec2:DescribeSecurityGroups",
+        "ec2:DescribeSubnets",
+        "ec2:DescribeVpcs",
+        "rds:DescribeDBInstances",
+        "rds:DescribeDBClusters",
+        "dynamodb:DescribeTable",
+        "dynamodb:ListTables",
+        "elasticache:DescribeCacheClusters",
+        "mq:DescribeBroker"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+> **Note:** The console automatically creates and attaches the appropriate policies. The above is for reference.
+
+#### Mandatory Resource Tags
+
+All AWS resources in this lab are tagged with:
+
+```
+devopsagent = "true"
+```
+
+This tag is **critical** for the DevOps Agent to:
+- Automatically discover resources associated with the Retail Store application
+- Correlate related resources during investigations
+- Scope troubleshooting to the correct infrastructure
+
+The Terraform deployment automatically applies this tag to all resources. If you create additional resources manually, ensure you add this tag.
+
+#### EKS Cluster Discovery
+
+AWS DevOps Agent automatically discovers your EKS cluster through the IAM roles configured during Agent Space creation. However, to access Kubernetes resources (pods, events, deployments), you must grant the DevOps Agent's IAM role access to the EKS cluster.
+
+#### Configure EKS Access for DevOps Agent (Required)
+
+> **⚠️ Important:** Without this step, the DevOps Agent will receive `401 Unauthorized` errors when trying to access Kubernetes events, pod status, and other cluster resources.
+
+The DevOps Agent needs an EKS Access Entry to query the Kubernetes API. Follow these steps:
+
+**Step 1: Get the DevOps Agent IAM Role ARN**
+
+1. Open the [AWS DevOps Agent Console](https://console.aws.amazon.com/devops-agent/home?region=us-east-1)
+2. Select your Agent Space
+3. Go to **Settings** and find the **Execution Role ARN**
+4. Copy the role ARN (e.g., `arn:aws:iam::123456789012:role/DevOpsAgentExecutionRole-xxxxx`)
+
+**Step 2: Add the Role to EKS Access Entries**
+
+**Option A: Using AWS Console**
+
+1. Open the [Amazon EKS Console](https://console.aws.amazon.com/eks)
+2. Select your cluster: `retail-store`
+3. Navigate to **Access** tab → **IAM access entries**
+4. Click **Create access entry**
+5. Configure:
+   - **IAM principal ARN:** Paste the DevOps Agent Execution Role ARN
+   - **Type:** Standard
+6. Click **Next**
+7. Add access policy:
+   - **Policy name:** `AmazonEKSClusterAdminPolicy`
+   - **Access scope:** Cluster
+8. Click **Create**
+
+**Option B: Using AWS CLI**
+
+```bash
+# Set your DevOps Agent's IAM role ARN
+DEVOPS_AGENT_ROLE_ARN="arn:aws:iam::YOUR_ACCOUNT_ID:role/YOUR_DEVOPS_AGENT_ROLE"
+
+# Create the access entry
+aws eks create-access-entry \
+  --cluster-name retail-store \
+  --principal-arn $DEVOPS_AGENT_ROLE_ARN \
+  --type STANDARD
+
+# Associate the cluster admin policy
+aws eks associate-access-policy \
+  --cluster-name retail-store \
+  --principal-arn $DEVOPS_AGENT_ROLE_ARN \
+  --policy-arn arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy \
+  --access-scope type=cluster
+```
+
+Once configured, the DevOps Agent will be able to:
+
+1. **Automatically discover** your EKS cluster (`retail-store`) through the Topology view
+2. **Correlate EKS resources** including:
+   - Namespaces and deployments
+   - Pod status and events
+   - Service configurations
+   - Resource utilization metrics
+3. **Build relationships** between your EKS workloads and backend services (RDS, DynamoDB, ElastiCache, etc.)
+
+To verify discovery, navigate to the **Topology** tab in your Agent Space. The topology shows key resources and relationships the agent has identified. As the agent completes more investigations, it will discover and add new resources to this view.
+
+> **Note:** All resources in this lab are tagged with `devopsagent = "true"`, which helps the agent identify and correlate related infrastructure components.
+
+> **📚 Documentation:** 
+> - [Creating an Agent Space](https://docs.aws.amazon.com/devopsagent/latest/userguide/getting-started-with-aws-devops-agent-creating-an-agent-space.html)
+> - [EKS Access Setup for DevOps Agent](https://docs.aws.amazon.com/devopsagent/latest/userguide/configuring-capabilities-for-aws-devops-agent-aws-eks-access-setup.html)
+
+> **💡 Troubleshooting:** If you still encounter permission issues after configuring the EKS access entry, attach the `AmazonEKSClusterPolicy` managed policy to the DevOps Agent Execution Role in IAM to grant full EKS access.
+
+### View Topology Graph
+
+The **Topology** view provides a visual map of your system components and their relationships. AWS DevOps Agent automatically builds this topology by analyzing your infrastructure.
+
+#### Accessing the Topology View
+
+1. Open your Agent Space in the AWS Console
+2. Click the **Topology** tab
+3. View the automatically discovered resources and relationships
+
+#### What the Topology Shows
+
+The topology graph displays:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        DevOps Agent Topology View                            │
+│                                                                              │
+│  ┌─────────────┐     ┌─────────────┐     ┌─────────────┐                    │
+│  │   EKS       │────▶│   Aurora    │     │  DynamoDB   │                    │
+│  │  Cluster    │     │   MySQL     │     │   Table     │                    │
+│  └──────┬──────┘     └─────────────┘     └─────────────┘                    │
+│         │                                                                    │
+│  ┌──────▼──────┐     ┌─────────────┐     ┌─────────────┐                    │
+│  │ Deployments │────▶│   Aurora    │     │ ElastiCache │                    │
+│  │ (5 services)│     │ PostgreSQL  │     │   Redis     │                    │
+│  └─────────────┘     └─────────────┘     └─────────────┘                    │
+│                                                                              │
+│  ┌─────────────┐     ┌─────────────┐                                        │
+│  │  CloudWatch │     │  Amazon MQ  │                                        │
+│  │   Alarms    │     │  RabbitMQ   │                                        │
+│  └─────────────┘     └─────────────┘                                        │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Understanding Relationships
+
+The DevOps Agent automatically detects:
+
+| Relationship Type | Example | How Detected |
+|-------------------|---------|--------------|
+| Service Dependencies | UI → Catalog | Network traffic analysis, service mesh |
+| Database Connections | Orders → Aurora PostgreSQL | Security group rules, connection strings |
+| Message Queue Links | Orders → RabbitMQ | Environment variables, connection configs |
+| Cache Dependencies | Checkout → Redis | Pod configurations, endpoint references |
+
+#### Topology Discovery Process
+
+1. **Initial Scan** - When you create the Agent Space, it scans for tagged resources
+2. **Continuous Learning** - As investigations complete, new resources are discovered
+3. **Relationship Mapping** - The agent analyzes:
+   - Security group rules
+   - IAM policies and roles
+   - Kubernetes service configurations
+   - Network flow logs
+   - Application traces (X-Ray)
+
+#### Filtering the Topology
+
+Use filters to focus on specific areas:
+- **By Service** - Show only resources related to a specific microservice
+- **By Resource Type** - Filter by EKS, RDS, DynamoDB, etc.
+- **By Health Status** - Highlight unhealthy or degraded resources
+
+### Operator Access
+
+Operator access allows your on-call engineers and DevOps team to interact with the AWS DevOps Agent through a dedicated web application.
+
+#### Enabling Operator Access
+
+1. **From the Agent Space Console**
+   - Navigate to your Agent Space
+   - Click **Operator access** in the left navigation
+   - Click **Enable operator access** if not already enabled
+
+2. **Access Methods**
+
+   **Option A: Direct Console Access**
+   - Click the **Operator access** link in your Agent Space
+   - This opens the DevOps Agent web app directly
+   - Requires AWS Console authentication
+
+   **Option B: AWS IAM Identity Center (Recommended for Teams)**
+   - Configure IAM Identity Center for your organization
+   - Create a permission set for DevOps Agent access
+   - Assign users/groups to the permission set
+   - Users can access via the Identity Center portal
+
+#### How the Agent Interacts with EKS
+
+The DevOps Agent interacts with your EKS cluster through:
+
+1. **Read-Only Kubernetes API Access**
+   - Lists pods, deployments, services, events
+   - Reads pod logs for error analysis
+   - Checks resource utilization metrics
+
+2. **CloudWatch Container Insights**
+   - Queries container metrics (CPU, memory, network)
+   - Analyzes Application Signals data
+   - Reviews performance anomalies
+
+3. **AWS API Calls**
+   - Describes EKS cluster configuration
+   - Checks node group status
+   - Reviews security group rules
+
+#### Safety Mechanisms
+
+AWS DevOps Agent includes several safety mechanisms:
+
+| Mechanism | Description |
+|-----------|-------------|
+| **Read-Only by Default** | The agent only reads data; it does not modify resources |
+| **Scoped Access** | Access is limited to resources within the Agent Space |
+| **Audit Logging** | All agent actions are logged to CloudTrail |
+| **Investigation Boundaries** | Investigations are scoped to specific incidents |
+| **Human-in-the-Loop** | Mitigation recommendations require human approval |
+
+#### Approval Workflows
+
+When the DevOps Agent identifies a mitigation:
+
+1. **Recommendation Generated** - Agent proposes a fix (e.g., "Scale up deployment")
+2. **Human Review** - Operator reviews the recommendation in the web app
+3. **Approval Required** - Operator must explicitly approve any changes
+4. **Implementation Guidance** - Agent provides detailed specs for implementation
+
+> **Important:** The DevOps Agent does **not** automatically make changes to your infrastructure. All mitigations are recommendations that require human approval and manual implementation.
+
+#### Starting an Investigation
+
+From the Operator Web App:
+
+1. Click **Start Investigation**
+2. Choose a starting point:
+   - **Latest alarm** - Investigate the most recent CloudWatch alarm
+   - **High CPU usage** - Analyze CPU utilization across resources
+   - **Error rate spike** - Investigate application error increases
+   - **Custom** - Describe the issue in your own words
+
+3. Provide investigation details:
+   - **Investigation details** - Describe what you're investigating
+   - **Date and time** - When the incident occurred
+   - **AWS Account ID** - The account containing the affected resources
+
+4. Click **Start** and watch the investigation unfold in real-time
+
+#### Investigation Prompts for Fault Injection Scenarios
+
+After injecting a fault using the scripts in the [Fault Injection Scenarios](#fault-injection-scenarios) section, use these prompts to start a DevOps Agent investigation:
+
+| Scenario | Investigation Details | Investigation Starting Point |
+|----------|----------------------|------------------------------|
+| [Catalog Latency](#1-catalog-service-latency-injection) | "Product pages are loading slow. Users are complaining about the catalog taking forever to load." | "Check the catalog service pods in the catalog namespace. Look at latency metrics and CPU usage." |
+| [RDS Stress Test](#2-rds-database-stress-test) | "Checkout is failing for customers. Orders aren't going through and we're seeing timeouts." | "Check the orders service and the RDS PostgreSQL database. Look at Performance Insights for slow queries." |
+| [Network Partition](#3-network-partition-ui--cart) | "Users can browse products fine but Add to Cart is broken. Getting timeout errors." | "Check connectivity between the UI service and the carts service. Look for network policies or blocked traffic." |
+| [RDS Security Group Block](#4-rds-security-group-misconfiguration) | "Orders and checkout are completely down. Getting 500 errors. RDS shows healthy but apps can't connect." | "Check the RDS security groups and VPC flow logs. The database is up but something is blocking connections." |
+| [Cart Memory Leak](#5-cart-memory-leak) | "Cart service pods keep restarting every few minutes. Users are seeing intermittent failures." | "Check the carts namespace for pod restarts and OOMKilled events. Look at memory usage patterns." |
+| [DynamoDB Latency](#6-dynamodb-latency) | "Adding items to cart is super slow. Used to be instant but now takes 3-5 seconds." | "Check DynamoDB metrics for the carts table. Look at latency and any throttling." |
+
+**Investigation Flow:**
+
+```
+┌─────────────────────┐     ┌─────────────────────┐     ┌─────────────────────┐
+│  1. Inject Fault    │────▶│  2. Observe Symptoms│────▶│  3. Start           │
+│  (run inject script)│     │  (monitoring tools) │     │  Investigation      │
+└─────────────────────┘     └─────────────────────┘     └──────────┬──────────┘
+                                                                   │
+                                                                   ▼
+┌─────────────────────┐     ┌─────────────────────┐     ┌─────────────────────┐
+│  6. Rollback Fault  │◀────│  5. Review & Approve│◀────│  4. Agent Analyzes  │
+│  (run rollback      │     │  Recommendations    │     │  & Correlates Data  │
+│   script)           │     │                     │     │                     │
+└─────────────────────┘     └─────────────────────┘     └─────────────────────┘
+```
+
+> **Tip:** For detailed investigation prompts with specific metrics and starting points, see the "DevOps Agent Investigation Prompts" section under each [Fault Injection Scenario](#fault-injection-scenarios).
+
+#### Interacting During Investigations
+
+You can interact with the agent during investigations:
+
+- **Ask clarifying questions**: "Which logs did you analyze?"
+- **Provide context**: "Focus on the orders namespace"
+- **Steer the investigation**: "Check the RDS connection pool metrics"
+- **Request AWS Support**: Create a support case with one click
+
+### Reading Documentation
+
+For the most up-to-date information about AWS DevOps Agent, refer to the official documentation:
+
+#### Official Resources
+
+| Resource | URL | Description |
+|----------|-----|-------------|
+| **Product Page** | https://aws.amazon.com/devops-agent | Overview and sign-up |
+| **AWS News Blog** | [Launch Announcement](https://aws.amazon.com/blogs/aws/aws-devops-agent-helps-you-accelerate-incident-response-and-improve-system-reliability-preview/) | Detailed walkthrough |
+| **IAM Reference** | [Service Authorization Reference](https://docs.aws.amazon.com/service-authorization/latest/reference/list_awsdevopsagentservice.html) | IAM actions and permissions |
+
+#### Key Concepts to Understand
+
+1. **Agent Spaces** - Logical boundaries for resource grouping
+2. **Topology** - Visual map of infrastructure relationships
+3. **Investigations** - Automated root cause analysis sessions
+4. **Mitigations** - Recommended fixes with implementation guidance
+5. **Integrations** - Connections to observability and CI/CD tools
+
+#### Supported Integrations
+
+AWS DevOps Agent integrates with:
+
+**Observability Tools:**
+- Amazon CloudWatch (native)
+- Datadog
+- Dynatrace
+- New Relic
+- Splunk
+- Grafana/Prometheus (via MCP)
+
+**CI/CD & Source Control:**
+- GitHub Actions
+- GitLab CI/CD
+
+**Incident Management:**
+- ServiceNow (native)
+- PagerDuty (via webhooks)
+- Slack (for notifications)
+
+**Custom Tools:**
+- Bring Your Own MCP Server for custom integrations
+
+#### Best Practices for This Lab
+
+1. **Tag All Resources** - Ensure `devopsagent = "true"` tag is applied
+2. **Enable Container Insights** - Already configured in Terraform
+3. **Configure Alarms** - Set up CloudWatch alarms for key metrics
+4. **Use Fault Injection** - Test the agent's investigation capabilities
+5. **Review Recommendations** - Learn from the agent's analysis
+
+---
+
 ## Fault Injection Scenarios
 
 This repository includes fault injection scripts for simulating production-like issues during demos and training sessions. These scenarios help demonstrate how DevOps agents and monitoring tools can detect and diagnose real-world problems.
@@ -1279,377 +1708,6 @@ For a training session, follow this workflow:
 6. **Rollback** - Run the rollback script to restore normal operation
 
 7. **Verify recovery** - Confirm all services return to healthy state
-
----
-
-## AWS DevOps Agent Integration
-
-AWS DevOps Agent is a frontier AI agent that helps accelerate incident response and improve system reliability. It automatically correlates data across your operational toolchain, identifies probable root causes, and recommends targeted mitigations. This section provides step-by-step guidance for integrating the DevOps Agent with your EKS-based Retail Store deployment.
-
-> **Note:** AWS DevOps Agent is currently in **public preview** and available in the **US East (N. Virginia) Region** (`us-east-1`). While the agent runs in `us-east-1`, it can monitor applications deployed in any AWS Region.
-
-### Create an Agent Space
-
-An **Agent Space** defines the scope of what AWS DevOps Agent can access as it performs tasks. Think of it as a logical boundary that groups related resources, applications, and infrastructure for investigation purposes.
-
-#### Organizing Your Agent Space
-
-You can organize Agent Spaces based on your operational model:
-- **Per Application** - One Agent Space per application (recommended for this lab)
-- **Per Team** - One Agent Space per on-call team managing multiple services
-- **Centralized** - Single Agent Space for the entire organization
-
-For this lab, we'll create an Agent Space specifically for the Retail Store application.
-
-#### Step-by-Step: Create an Agent Space
-
-1. **Navigate to AWS DevOps Agent Console**
-   ```
-   https://console.aws.amazon.com/devops-agent/home?region=us-east-1
-   ```
-
-2. **Create the Agent Space**
-   - Click **Create Agent Space**
-   - Enter a name: `retail-store-lab` (or your preferred name)
-   - Optionally add a description: "Agent Space for AWS Retail Store Sample Application on EKS"
-
-3. **Configure IAM Roles**
-   
-   The console will guide you to create the required IAM roles. AWS DevOps Agent needs permissions to:
-   - Introspect AWS resources in your account(s)
-   - Access CloudWatch metrics and logs
-   - Query X-Ray traces
-   - Read EKS cluster information
-   
-   The agent creates two IAM roles:
-   - **AgentSpace Execution Role** - Used by the agent to perform investigations
-   - **Cross-Account Role** (optional) - For monitoring resources in other AWS accounts
-
-4. **Enable the Web App**
-   - Check the option to **Enable AWS DevOps Agent web app**
-   - This provides a web interface for operators to trigger and monitor investigations
-
-5. **Click Create**
-   - Wait for the Agent Space to be created (typically 1-2 minutes)
-
-#### Required IAM Permissions
-
-The IAM role created for the Agent Space requires the following permissions:
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "cloudwatch:GetMetricData",
-        "cloudwatch:GetMetricStatistics",
-        "cloudwatch:ListMetrics",
-        "cloudwatch:DescribeAlarms",
-        "logs:GetLogEvents",
-        "logs:FilterLogEvents",
-        "logs:DescribeLogGroups",
-        "logs:DescribeLogStreams",
-        "xray:GetTraceSummaries",
-        "xray:BatchGetTraces",
-        "eks:DescribeCluster",
-        "eks:ListClusters",
-        "eks:ListNodegroups",
-        "eks:DescribeNodegroup",
-        "ec2:DescribeInstances",
-        "ec2:DescribeSecurityGroups",
-        "ec2:DescribeSubnets",
-        "ec2:DescribeVpcs",
-        "rds:DescribeDBInstances",
-        "rds:DescribeDBClusters",
-        "dynamodb:DescribeTable",
-        "dynamodb:ListTables",
-        "elasticache:DescribeCacheClusters",
-        "mq:DescribeBroker"
-      ],
-      "Resource": "*"
-    }
-  ]
-}
-```
-
-> **Note:** The console automatically creates and attaches the appropriate policies. The above is for reference.
-
-#### Mandatory Resource Tags
-
-All AWS resources in this lab are tagged with:
-
-```
-devopsagent = "true"
-```
-
-This tag is **critical** for the DevOps Agent to:
-- Automatically discover resources associated with the Retail Store application
-- Correlate related resources during investigations
-- Scope troubleshooting to the correct infrastructure
-
-The Terraform deployment automatically applies this tag to all resources. If you create additional resources manually, ensure you add this tag.
-
-#### EKS Cluster Discovery
-
-AWS DevOps Agent automatically discovers your EKS cluster through the IAM roles configured during Agent Space creation. There is no manual "Add Resource Source" step required.
-
-Once your Agent Space is created with the appropriate IAM permissions, the agent will:
-
-1. **Automatically discover** your EKS cluster (`retail-store`) through the Topology view
-2. **Correlate EKS resources** including:
-   - Namespaces and deployments
-   - Pod status and events
-   - Service configurations
-   - Resource utilization metrics
-3. **Build relationships** between your EKS workloads and backend services (RDS, DynamoDB, ElastiCache, etc.)
-
-To verify discovery, navigate to the **Topology** tab in your Agent Space. The topology shows key resources and relationships the agent has identified. As the agent completes more investigations, it will discover and add new resources to this view.
-
-> **Note:** All resources in this lab are tagged with `devopsagent = "true"`, which helps the agent identify and correlate related infrastructure components.
-
-> **📚 Documentation:** For detailed instructions on creating an Agent Space, see the [AWS DevOps Agent User Guide - Creating an Agent Space](https://docs.aws.amazon.com/devopsagent/latest/userguide/getting-started-with-aws-devops-agent-creating-an-agent-space.html).
-
-### View Topology Graph
-
-The **Topology** view provides a visual map of your system components and their relationships. AWS DevOps Agent automatically builds this topology by analyzing your infrastructure.
-
-#### Accessing the Topology View
-
-1. Open your Agent Space in the AWS Console
-2. Click the **Topology** tab
-3. View the automatically discovered resources and relationships
-
-#### What the Topology Shows
-
-The topology graph displays:
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                        DevOps Agent Topology View                            │
-│                                                                              │
-│  ┌─────────────┐     ┌─────────────┐     ┌─────────────┐                    │
-│  │   EKS       │────▶│   Aurora    │     │  DynamoDB   │                    │
-│  │  Cluster    │     │   MySQL     │     │   Table     │                    │
-│  └──────┬──────┘     └─────────────┘     └─────────────┘                    │
-│         │                                                                    │
-│  ┌──────▼──────┐     ┌─────────────┐     ┌─────────────┐                    │
-│  │ Deployments │────▶│   Aurora    │     │ ElastiCache │                    │
-│  │ (5 services)│     │ PostgreSQL  │     │   Redis     │                    │
-│  └─────────────┘     └─────────────┘     └─────────────┘                    │
-│                                                                              │
-│  ┌─────────────┐     ┌─────────────┐                                        │
-│  │  CloudWatch │     │  Amazon MQ  │                                        │
-│  │   Alarms    │     │  RabbitMQ   │                                        │
-│  └─────────────┘     └─────────────┘                                        │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-#### Understanding Relationships
-
-The DevOps Agent automatically detects:
-
-| Relationship Type | Example | How Detected |
-|-------------------|---------|--------------|
-| Service Dependencies | UI → Catalog | Network traffic analysis, service mesh |
-| Database Connections | Orders → Aurora PostgreSQL | Security group rules, connection strings |
-| Message Queue Links | Orders → RabbitMQ | Environment variables, connection configs |
-| Cache Dependencies | Checkout → Redis | Pod configurations, endpoint references |
-
-#### Topology Discovery Process
-
-1. **Initial Scan** - When you create the Agent Space, it scans for tagged resources
-2. **Continuous Learning** - As investigations complete, new resources are discovered
-3. **Relationship Mapping** - The agent analyzes:
-   - Security group rules
-   - IAM policies and roles
-   - Kubernetes service configurations
-   - Network flow logs
-   - Application traces (X-Ray)
-
-#### Filtering the Topology
-
-Use filters to focus on specific areas:
-- **By Service** - Show only resources related to a specific microservice
-- **By Resource Type** - Filter by EKS, RDS, DynamoDB, etc.
-- **By Health Status** - Highlight unhealthy or degraded resources
-
-### Operator Access
-
-Operator access allows your on-call engineers and DevOps team to interact with the AWS DevOps Agent through a dedicated web application.
-
-#### Enabling Operator Access
-
-1. **From the Agent Space Console**
-   - Navigate to your Agent Space
-   - Click **Operator access** in the left navigation
-   - Click **Enable operator access** if not already enabled
-
-2. **Access Methods**
-
-   **Option A: Direct Console Access**
-   - Click the **Operator access** link in your Agent Space
-   - This opens the DevOps Agent web app directly
-   - Requires AWS Console authentication
-
-   **Option B: AWS IAM Identity Center (Recommended for Teams)**
-   - Configure IAM Identity Center for your organization
-   - Create a permission set for DevOps Agent access
-   - Assign users/groups to the permission set
-   - Users can access via the Identity Center portal
-
-#### How the Agent Interacts with EKS
-
-The DevOps Agent interacts with your EKS cluster through:
-
-1. **Read-Only Kubernetes API Access**
-   - Lists pods, deployments, services, events
-   - Reads pod logs for error analysis
-   - Checks resource utilization metrics
-
-2. **CloudWatch Container Insights**
-   - Queries container metrics (CPU, memory, network)
-   - Analyzes Application Signals data
-   - Reviews performance anomalies
-
-3. **AWS API Calls**
-   - Describes EKS cluster configuration
-   - Checks node group status
-   - Reviews security group rules
-
-#### Safety Mechanisms
-
-AWS DevOps Agent includes several safety mechanisms:
-
-| Mechanism | Description |
-|-----------|-------------|
-| **Read-Only by Default** | The agent only reads data; it does not modify resources |
-| **Scoped Access** | Access is limited to resources within the Agent Space |
-| **Audit Logging** | All agent actions are logged to CloudTrail |
-| **Investigation Boundaries** | Investigations are scoped to specific incidents |
-| **Human-in-the-Loop** | Mitigation recommendations require human approval |
-
-#### Approval Workflows
-
-When the DevOps Agent identifies a mitigation:
-
-1. **Recommendation Generated** - Agent proposes a fix (e.g., "Scale up deployment")
-2. **Human Review** - Operator reviews the recommendation in the web app
-3. **Approval Required** - Operator must explicitly approve any changes
-4. **Implementation Guidance** - Agent provides detailed specs for implementation
-
-> **Important:** The DevOps Agent does **not** automatically make changes to your infrastructure. All mitigations are recommendations that require human approval and manual implementation.
-
-#### Starting an Investigation
-
-From the Operator Web App:
-
-1. Click **Start Investigation**
-2. Choose a starting point:
-   - **Latest alarm** - Investigate the most recent CloudWatch alarm
-   - **High CPU usage** - Analyze CPU utilization across resources
-   - **Error rate spike** - Investigate application error increases
-   - **Custom** - Describe the issue in your own words
-
-3. Provide investigation details:
-   - **Investigation details** - Describe what you're investigating
-   - **Date and time** - When the incident occurred
-   - **AWS Account ID** - The account containing the affected resources
-
-4. Click **Start** and watch the investigation unfold in real-time
-
-#### Investigation Prompts for Fault Injection Scenarios
-
-After injecting a fault using the scripts in the [Fault Injection Scenarios](#fault-injection-scenarios) section, use these prompts to start a DevOps Agent investigation:
-
-| Scenario | Investigation Details | Investigation Starting Point |
-|----------|----------------------|------------------------------|
-| [Catalog Latency](#1-catalog-service-latency-injection) | "Product pages are loading slow. Users are complaining about the catalog taking forever to load." | "Check the catalog service pods in the catalog namespace. Look at latency metrics and CPU usage." |
-| [RDS Stress Test](#2-rds-database-stress-test) | "Checkout is failing for customers. Orders aren't going through and we're seeing timeouts." | "Check the orders service and the RDS PostgreSQL database. Look at Performance Insights for slow queries." |
-| [Network Partition](#3-network-partition-ui--cart) | "Users can browse products fine but Add to Cart is broken. Getting timeout errors." | "Check connectivity between the UI service and the carts service. Look for network policies or blocked traffic." |
-| [RDS Security Group Block](#4-rds-security-group-misconfiguration) | "Orders and checkout are completely down. Getting 500 errors. RDS shows healthy but apps can't connect." | "Check the RDS security groups and VPC flow logs. The database is up but something is blocking connections." |
-| [Cart Memory Leak](#5-cart-memory-leak) | "Cart service pods keep restarting every few minutes. Users are seeing intermittent failures." | "Check the carts namespace for pod restarts and OOMKilled events. Look at memory usage patterns." |
-| [DynamoDB Latency](#6-dynamodb-latency) | "Adding items to cart is super slow. Used to be instant but now takes 3-5 seconds." | "Check DynamoDB metrics for the carts table. Look at latency and any throttling." |
-
-**Investigation Flow:**
-
-```
-┌─────────────────────┐     ┌─────────────────────┐     ┌─────────────────────┐
-│  1. Inject Fault    │────▶│  2. Observe Symptoms│────▶│  3. Start           │
-│  (run inject script)│     │  (monitoring tools) │     │  Investigation      │
-└─────────────────────┘     └─────────────────────┘     └──────────┬──────────┘
-                                                                   │
-                                                                   ▼
-┌─────────────────────┐     ┌─────────────────────┐     ┌─────────────────────┐
-│  6. Rollback Fault  │◀────│  5. Review & Approve│◀────│  4. Agent Analyzes  │
-│  (run rollback      │     │  Recommendations    │     │  & Correlates Data  │
-│   script)           │     │                     │     │                     │
-└─────────────────────┘     └─────────────────────┘     └─────────────────────┘
-```
-
-> **Tip:** For detailed investigation prompts with specific metrics and starting points, see the "DevOps Agent Investigation Prompts" section under each [Fault Injection Scenario](#fault-injection-scenarios).
-
-#### Interacting During Investigations
-
-You can interact with the agent during investigations:
-
-- **Ask clarifying questions**: "Which logs did you analyze?"
-- **Provide context**: "Focus on the orders namespace"
-- **Steer the investigation**: "Check the RDS connection pool metrics"
-- **Request AWS Support**: Create a support case with one click
-
-### Reading Documentation
-
-For the most up-to-date information about AWS DevOps Agent, refer to the official documentation:
-
-#### Official Resources
-
-| Resource | URL | Description |
-|----------|-----|-------------|
-| **Product Page** | https://aws.amazon.com/devops-agent | Overview and sign-up |
-| **AWS News Blog** | [Launch Announcement](https://aws.amazon.com/blogs/aws/aws-devops-agent-helps-you-accelerate-incident-response-and-improve-system-reliability-preview/) | Detailed walkthrough |
-| **IAM Reference** | [Service Authorization Reference](https://docs.aws.amazon.com/service-authorization/latest/reference/list_awsdevopsagentservice.html) | IAM actions and permissions |
-
-#### Key Concepts to Understand
-
-1. **Agent Spaces** - Logical boundaries for resource grouping
-2. **Topology** - Visual map of infrastructure relationships
-3. **Investigations** - Automated root cause analysis sessions
-4. **Mitigations** - Recommended fixes with implementation guidance
-5. **Integrations** - Connections to observability and CI/CD tools
-
-#### Supported Integrations
-
-AWS DevOps Agent integrates with:
-
-**Observability Tools:**
-- Amazon CloudWatch (native)
-- Datadog
-- Dynatrace
-- New Relic
-- Splunk
-- Grafana/Prometheus (via MCP)
-
-**CI/CD & Source Control:**
-- GitHub Actions
-- GitLab CI/CD
-
-**Incident Management:**
-- ServiceNow (native)
-- PagerDuty (via webhooks)
-- Slack (for notifications)
-
-**Custom Tools:**
-- Bring Your Own MCP Server for custom integrations
-
-#### Best Practices for This Lab
-
-1. **Tag All Resources** - Ensure `devopsagent = "true"` tag is applied
-2. **Enable Container Insights** - Already configured in Terraform
-3. **Configure Alarms** - Set up CloudWatch alarms for key metrics
-4. **Use Fault Injection** - Test the agent's investigation capabilities
-5. **Review Recommendations** - Learn from the agent's analysis
 
 ---
 
