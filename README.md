@@ -731,7 +731,11 @@ helm version
    ```bash
    terraform apply -var="enable_grafana=true"
    ```
-5. After deployment, assign users to the Grafana workspace
+5. After deployment, assign yourself as Grafana admin:
+   - Go to [Amazon Managed Grafana console](https://console.aws.amazon.com/grafana)
+   - Select the `retail-store-grafana` workspace
+   - Go to **Authentication** tab → **Assign new user or group**
+   - Select your SSO user and assign **ADMIN** role
 
 ### Terraform Deployment Options
 

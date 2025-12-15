@@ -544,14 +544,12 @@ resource "aws_grafana_workspace" "retail_store" {
   tags = var.tags
 }
 
-# Assign SSO user as Grafana Admin
-resource "aws_grafana_role_association" "admin" {
-  count = var.enable_grafana ? 1 : 0
-
-  role         = "ADMIN"
-  user_ids     = ["93670cbcb3-674ed0ab-834b-437c-b3ac-59439269e212"]  # kulkshya@amazon.com
-  workspace_id = aws_grafana_workspace.retail_store[0].id
-}
+# Note: Grafana admin user assignment is done manually after deployment
+# To assign yourself as admin:
+# 1. Go to Amazon Managed Grafana console
+# 2. Select the workspace
+# 3. Go to Authentication tab -> Assign new user or group
+# 4. Select your SSO user and assign ADMIN role
 
 # IAM Role for Grafana
 resource "aws_iam_role" "grafana" {
