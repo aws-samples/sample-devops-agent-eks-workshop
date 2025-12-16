@@ -76,6 +76,16 @@ git checkout devops-agent-integration
 > git clone git@gitlab.aws.dev:kulkshya/retail-app-automode.git
 > ```
 
+> **🔧 Troubleshooting Git Clone Issues?** If you're encountering persistent issues with `git clone` (SSH key problems, network restrictions, etc.), you can download the repository as a ZIP file instead:
+> 1. Navigate to the repository in your browser: https://gitlab.aws.dev/kulkshya/retail-app-automode
+> 2. Click the **Download** button (or **Code** → **Download source code**)
+> 3. Select **Download ZIP** (or your preferred format)
+> 4. Extract the ZIP file to your desired location:
+>    ```bash
+>    unzip retail-app-automode-devops-agent-integration.zip
+>    cd retail-app-automode-devops-agent-integration
+>    ```
+
 **Branch Information:**
 - `main` - Stable release branch
 - `devops-agent-integration` - Contains DevOps Agent integration with fault injection scenarios and observability setup (recommended for this lab)
