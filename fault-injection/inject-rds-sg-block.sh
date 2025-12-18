@@ -91,10 +91,11 @@ for row in $(echo "$RDS_INFO" | jq -r '.[] | @base64'); do
   fi
 done
 
-# Save revoked rules for rollback
-echo "{\"region\": \"$REGION\", \"eks_sg\": \"$EKS_SG\", \"revoked_rules\": $REVOKED_RULES}" > fault-injection/rds-sg-ids.json
+# Save revoked rules for rollback (use script directory)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+echo "{\"region\": \"$REGION\", \"eks_sg\": \"$EKS_SG\", \"revoked_rules\": $REVOKED_RULES}" > "$SCRIPT_DIR/rds-sg-ids.json"
 echo ""
-echo "  Backup saved to: fault-injection/rds-sg-ids.json"
+echo "  Backup saved to: $SCRIPT_DIR/rds-sg-ids.json"
 
 REVOKED_COUNT=$(echo "$REVOKED_RULES" | jq 'length')
 if [ "$REVOKED_COUNT" -eq 0 ]; then

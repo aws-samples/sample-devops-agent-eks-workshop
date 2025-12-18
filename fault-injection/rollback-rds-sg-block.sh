@@ -9,9 +9,13 @@ REGION="${AWS_REGION:-us-east-1}"
 echo "=== RDS Security Group Rollback ==="
 echo ""
 
+# Use script directory for backup file
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BACKUP_FILE="$SCRIPT_DIR/rds-sg-ids.json"
+
 # Check if backup file exists
-if [ ! -f "fault-injection/rds-sg-ids.json" ]; then
-  echo "ERROR: No backup file found at fault-injection/rds-sg-ids.json"
+if [ ! -f "$BACKUP_FILE" ]; then
+  echo "ERROR: No backup file found at $BACKUP_FILE"
   echo "Cannot rollback without knowing which rules were revoked."
   echo ""
   echo "Manual rollback: Add ingress rules to your RDS security groups allowing"
@@ -20,9 +24,9 @@ if [ ! -f "fault-injection/rds-sg-ids.json" ]; then
 fi
 
 # Load backup info
-REGION=$(jq -r '.region' fault-injection/rds-sg-ids.json)
-EKS_SG=$(jq -r '.eks_sg' fault-injection/rds-sg-ids.json)
-REVOKED_RULES=$(jq -r '.revoked_rules' fault-injection/rds-sg-ids.json)
+REGION=$(jq -r '.region' "$BACKUP_FILE")
+EKS_SG=$(jq -r '.eks_sg' "$BACKUP_FILE")
+REVOKED_RULES=$(jq -r '.revoked_rules' "$BACKUP_FILE")
 
 echo "Region: $REGION"
 echo "EKS Security Group: $EKS_SG"

@@ -5,12 +5,29 @@
 set -e
 
 NAMESPACE="orders"
-DB_HOST="retail-store-orders.cluster-cfkkvgfaqokl.us-east-1.rds.amazonaws.com"
+REGION="${AWS_REGION:-us-east-1}"
+
+# Auto-discover RDS PostgreSQL endpoint
+echo "=== RDS Performance Degradation Injection (Heavy) ==="
+echo ""
+echo "[0/2] Discovering RDS PostgreSQL endpoint..."
+
+# Find PostgreSQL RDS instance (port 5432)
+DB_HOST=$(AWS_PAGER="" aws rds describe-db-instances --region $REGION \
+  --query "DBInstances[?Endpoint.Port==\`5432\`].Endpoint.Address" \
+  --output text 2>/dev/null | head -1)
+
+if [ -z "$DB_HOST" ] || [ "$DB_HOST" == "None" ]; then
+  echo "ERROR: No PostgreSQL RDS instance found in region $REGION"
+  exit 1
+fi
+
 DB_PORT="5432"
 DB_NAME="orders"
 DB_USER="root"
 
-echo "=== RDS Performance Degradation Injection (Heavy) ==="
+echo "  Found: $DB_HOST"
+echo ""
 echo "Target: $DB_HOST:$DB_PORT/$DB_NAME"
 echo ""
 
