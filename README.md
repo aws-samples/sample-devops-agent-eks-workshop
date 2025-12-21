@@ -1702,11 +1702,11 @@ When you're finished with the lab, it's important to clean up all AWS resources 
 
 Running `terraform destroy` alone may not remove all resources because:
 
-1. **AWS GuardDuty** automatically creates VPC endpoints and security groups for runtime monitoring
+1. **AWS GuardDuty** automatically creates VPC endpoints and security groups for runtime monitoring - these block subnet/VPC deletion
 2. **CloudWatch Container Insights** creates log groups dynamically when the agent starts
 3. **Kubernetes resources** (Helm releases, namespaces) can cause provider errors during destroy
 
-The cleanup script handles all of these edge cases.
+The cleanup script handles all of these edge cases by cleaning up AWS auto-provisioned resources BEFORE running terraform destroy.
 
 ### Quick Cleanup (Recommended)
 
@@ -1716,82 +1716,97 @@ Use the provided destroy script for a complete cleanup:
 # Make the script executable
 chmod +x scripts/destroy-environment.sh
 
-# Run the cleanup script
+# Run the cleanup script (uses defaults: CLUSTER_NAME=retail-store, AWS_REGION=us-east-1)
 ./scripts/destroy-environment.sh
+
+# Or override defaults
+CLUSTER_NAME=my-cluster AWS_REGION=us-west-2 ./scripts/destroy-environment.sh
 ```
 
 The script will:
-1. Remove Kubernetes resources from Terraform state (prevents provider errors)
-2. Run `terraform destroy` to remove all Terraform-managed resources
-3. Delete any GuardDuty-managed VPC endpoints and security groups
-4. Clean up orphaned CloudWatch log groups
+1. Get VPC ID for the cluster
+2. Delete VPC endpoints and GuardDuty security groups (prevents subnet deletion failures)
+3. Remove Kubernetes resources from Terraform state (prevents provider errors)
+4. Run `terraform destroy` to remove all Terraform-managed resources
+5. Final VPC cleanup if it still exists
+6. Clean up orphaned CloudWatch log groups
 
 ### Manual Cleanup Steps
 
 If you prefer to clean up manually or need to troubleshoot:
 
-**Step 1: Remove Kubernetes Resources from Terraform State**
+**Step 1: Get VPC ID**
 
 ```bash
-cd terraform/eks/default
-
-# Remove Helm releases (prevents Kubernetes provider errors)
-terraform state rm 'helm_release.ui' 2>/dev/null || true
-terraform state rm 'helm_release.catalog' 2>/dev/null || true
-terraform state rm 'helm_release.carts' 2>/dev/null || true
-terraform state rm 'helm_release.orders' 2>/dev/null || true
-terraform state rm 'helm_release.checkout' 2>/dev/null || true
-
-# Remove Kubernetes namespaces
-terraform state rm 'kubernetes_namespace.ui' 2>/dev/null || true
-terraform state rm 'kubernetes_namespace.catalog' 2>/dev/null || true
-terraform state rm 'kubernetes_namespace.carts' 2>/dev/null || true
-terraform state rm 'kubernetes_namespace.orders' 2>/dev/null || true
-terraform state rm 'kubernetes_namespace.checkout' 2>/dev/null || true
-terraform state rm 'kubernetes_namespace.rabbitmq' 2>/dev/null || true
-
-# Remove aws_auth ConfigMap
-terraform state rm 'kubernetes_config_map_v1_data.aws_auth' 2>/dev/null || true
-```
-
-**Step 2: Run Terraform Destroy**
-
-```bash
-terraform destroy -auto-approve
-```
-
-**Step 3: Clean Up GuardDuty Resources (if VPC deletion fails)**
-
-If the VPC fails to delete, check for GuardDuty-managed resources:
-
-```bash
-# Get the VPC ID
 VPC_ID=$(aws ec2 describe-vpcs --filters "Name=tag:environment-name,Values=retail-store" --query "Vpcs[0].VpcId" --output text --region us-east-1)
+echo "VPC ID: $VPC_ID"
+```
 
+**Step 2: Clean Up GuardDuty Resources FIRST**
+
+This must be done BEFORE terraform destroy to prevent subnet deletion failures:
+
+```bash
 # Delete VPC endpoints created by GuardDuty
-aws ec2 describe-vpc-endpoints --filters "Name=vpc-id,Values=$VPC_ID" --query "VpcEndpoints[*].VpcEndpointId" --output text --region us-east-1 | xargs -r aws ec2 delete-vpc-endpoints --vpc-endpoint-ids --region us-east-1
+ENDPOINTS=$(aws ec2 describe-vpc-endpoints --filters "Name=vpc-id,Values=$VPC_ID" --query "VpcEndpoints[*].VpcEndpointId" --output text --region us-east-1)
+for ep in $ENDPOINTS; do
+    echo "Deleting VPC endpoint: $ep"
+    aws ec2 delete-vpc-endpoints --vpc-endpoint-ids $ep --region us-east-1
+done
 
 # Wait for endpoints to be deleted
 sleep 30
 
 # Delete GuardDuty security groups
-aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$VPC_ID" "Name=group-name,Values=GuardDuty*" --query "SecurityGroups[*].GroupId" --output text --region us-east-1 | xargs -r -I {} aws ec2 delete-security-group --group-id {} --region us-east-1
-
-# Now delete the VPC
-aws ec2 delete-vpc --vpc-id $VPC_ID --region us-east-1
+SG_IDS=$(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$VPC_ID" "Name=group-name,Values=GuardDuty*" --query "SecurityGroups[*].GroupId" --output text --region us-east-1)
+for sg in $SG_IDS; do
+    echo "Deleting GuardDuty security group: $sg"
+    aws ec2 delete-security-group --group-id $sg --region us-east-1
+done
 ```
 
-**Step 4: Clean Up CloudWatch Log Groups**
+**Step 3: Remove Kubernetes Resources from Terraform State**
+
+```bash
+cd terraform/eks/default
+
+# Remove aws_auth ConfigMap
+terraform state rm 'kubernetes_config_map_v1_data.aws_auth' 2>/dev/null || true
+
+# Remove Helm releases (prevents Kubernetes provider errors)
+terraform state rm 'helm_release.ui' 'helm_release.catalog' 'helm_release.carts' 'helm_release.orders' 'helm_release.checkout' 2>/dev/null || true
+
+# Remove Kubernetes namespaces
+terraform state rm 'kubernetes_namespace.ui' 'kubernetes_namespace.catalog' 'kubernetes_namespace.carts' 'kubernetes_namespace.orders' 'kubernetes_namespace.checkout' 'kubernetes_namespace.rabbitmq' 2>/dev/null || true
+```
+
+**Step 4: Run Terraform Destroy**
+
+```bash
+terraform destroy -auto-approve
+```
+
+**Step 5: Final VPC Cleanup (if needed)**
+
+```bash
+# Try to delete VPC if it still exists
+aws ec2 delete-vpc --vpc-id $VPC_ID --region us-east-1 2>/dev/null || true
+```
+
+**Step 6: Clean Up CloudWatch Log Groups**
 
 ```bash
 # Delete Container Insights log groups
-aws logs delete-log-group --log-group-name /aws/containerinsights/retail-store/application --region us-east-1 2>/dev/null || true
-aws logs delete-log-group --log-group-name /aws/containerinsights/retail-store/dataplane --region us-east-1 2>/dev/null || true
-aws logs delete-log-group --log-group-name /aws/containerinsights/retail-store/host --region us-east-1 2>/dev/null || true
-aws logs delete-log-group --log-group-name /aws/containerinsights/retail-store/performance --region us-east-1 2>/dev/null || true
+for lg in $(aws logs describe-log-groups --log-group-name-prefix /aws/containerinsights/retail-store --query "logGroups[*].logGroupName" --output text --region us-east-1); do
+    echo "Deleting log group: $lg"
+    aws logs delete-log-group --log-group-name "$lg" --region us-east-1
+done
 
-# Delete EKS cluster log groups (if any remain)
-aws logs describe-log-groups --log-group-name-prefix /aws/eks/retail-store --query "logGroups[*].logGroupName" --output text --region us-east-1 | xargs -r -I {} aws logs delete-log-group --log-group-name {} --region us-east-1
+# Delete EKS cluster log groups
+for lg in $(aws logs describe-log-groups --log-group-name-prefix /aws/eks/retail-store --query "logGroups[*].logGroupName" --output text --region us-east-1); do
+    echo "Deleting log group: $lg"
+    aws logs delete-log-group --log-group-name "$lg" --region us-east-1
+done
 ```
 
 ### Verify Cleanup

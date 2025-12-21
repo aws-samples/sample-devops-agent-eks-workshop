@@ -1,16 +1,26 @@
 #!/bin/bash
 set -e
 
-# Destroy script for retail-store EKS environment
+# Destroy script for EKS environment
 # Handles Terraform-managed resources AND AWS auto-provisioned resources
 
+# Default values (can be overridden via environment variables)
 CLUSTER_NAME="${CLUSTER_NAME:-retail-store}"
 REGION="${AWS_REGION:-us-east-1}"
-TERRAFORM_DIR="terraform/eks/default"
 
-echo "=== Destroying retail-store environment ==="
+# Get the repo root directory (parent of scripts/)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+TERRAFORM_DIR="${TERRAFORM_DIR:-$REPO_ROOT/terraform/eks/default}"
+
+echo "=== Destroying EKS environment ==="
 echo "Cluster: $CLUSTER_NAME"
 echo "Region: $REGION"
+echo "Terraform Dir: $TERRAFORM_DIR"
+echo ""
+echo "To override defaults, set environment variables:"
+echo "  CLUSTER_NAME=<name> AWS_REGION=<region> $0"
+echo ""
 
 # Step 1: Get VPC ID before destroying (needed for cleanup)
 VPC_ID=$(aws ec2 describe-vpcs --filters "Name=tag:environment-name,Values=$CLUSTER_NAME" --query "Vpcs[0].VpcId" --output text --region $REGION 2>/dev/null || echo "None")
@@ -61,9 +71,9 @@ if [ "$VPC_ID" != "None" ] && [ "$VPC_ID" != "null" ] && [ -n "$VPC_ID" ]; then
     aws ec2 delete-vpc --vpc-id $VPC_ID --region $REGION 2>/dev/null || true
 fi
 
-# Step 4: Clean up CloudWatch log groups created by Container Insights
+# Step 6: Clean up CloudWatch log groups created by Container Insights
 echo ""
-echo "=== Step 4: Cleaning up CloudWatch log groups ==="
+echo "=== Step 6: Cleaning up CloudWatch log groups ==="
 LOG_GROUPS=$(aws logs describe-log-groups --log-group-name-prefix "/aws/containerinsights/$CLUSTER_NAME" --query "logGroups[*].logGroupName" --output text --region $REGION 2>/dev/null || echo "")
 for lg in $LOG_GROUPS; do
     echo "Deleting log group: $lg"
