@@ -63,11 +63,9 @@ git --version
 ```bash
 # Clone the repository
 git clone git@ssh.gitlab.aws.dev:kulkshya/retail-app-automode.git
-git clone https://github.com/aws-samples/AmazonEKS-Devops-agent-sample.git
 
 # Navigate to the project directory
 cd retail-app-automode
-cd AmazonEKS-Devops-agent-sample
 ```
 
 > **Note:** If the above clone command fails, try using the alternative GitLab URL:
@@ -75,24 +73,15 @@ cd AmazonEKS-Devops-agent-sample
 > git clone git@gitlab.aws.dev:kulkshya/retail-app-automode.git
 > ```
 
-> **🔧 Troubleshooting Git Clone Issues?** If you're encountering persistent issues with `git clone` (SSH key problems, network restrictions, etc.), you can download the repositories as ZIP files instead:
->
-> **For GitLab (retail-app-automode):**
+> **🔧 Troubleshooting Git Clone Issues?** If you're encountering persistent issues with `git clone` (SSH key problems, network restrictions, etc.), you can download the repository as a ZIP file instead:
 > 1. Navigate to: https://gitlab.aws.dev/kulkshya/retail-app-automode
 > 2. Click the **Download** button (or **Code** → **Download source code**)
 > 3. Select **Download ZIP**
->
-> **For GitHub (AmazonEKS-Devops-agent-sample):**
-> 1. Navigate to: https://github.com/aws-samples/AmazonEKS-Devops-agent-sample
-> 2. Click the **Code** button → **Download ZIP**
->
-> **Extract and navigate:**
-> ```bash
-> unzip retail-app-automode-main.zip
-> cd retail-app-automode-main
-> unzip AmazonEKS-Devops-agent-sample-main.zip
-> cd AmazonEKS-Devops-agent-sample-main
-> ```
+> 4. Extract and navigate:
+>    ```bash
+>    unzip retail-app-automode-main.zip
+>    cd retail-app-automode-main
+>    ```
 
 ---
 ## Lab Introduction & Goals
