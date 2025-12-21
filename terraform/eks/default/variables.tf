@@ -1,7 +1,20 @@
-variable "environment_name" {
-  description = "Name of the environment"
+variable "cluster_name" {
+  description = "Name of the EKS cluster"
   type        = string
   default     = "retail-store"
+}
+
+variable "region" {
+  description = "AWS region for deployment"
+  type        = string
+  default     = "us-east-1"
+}
+
+# Alias for backward compatibility
+variable "environment_name" {
+  description = "Name of the environment (deprecated, use cluster_name instead)"
+  type        = string
+  default     = ""
 }
 
 variable "istio_enabled" {

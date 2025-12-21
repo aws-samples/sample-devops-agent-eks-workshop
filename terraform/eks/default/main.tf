@@ -2,27 +2,30 @@ locals {
   # Disabled Security Groups for Pods for EKS Auto Mode compatibility
   # Always use node security group for database access
   security_groups_active = false
+  
+  # Use cluster_name if set, otherwise fall back to environment_name for backward compatibility
+  cluster_name = var.cluster_name != "" ? var.cluster_name : (var.environment_name != "" ? var.environment_name : "retail-store")
 }
 
 module "tags" {
   source = "../../lib/tags"
 
-  environment_name = var.environment_name
+  environment_name = local.cluster_name
 }
 
 module "vpc" {
   source = "../../lib/vpc"
 
-  environment_name = var.environment_name
+  environment_name = local.cluster_name
 
   public_subnet_tags = {
-    "kubernetes.io/cluster/${var.environment_name}" = "shared"
-    "kubernetes.io/role/elb"                        = 1
+    "kubernetes.io/cluster/${local.cluster_name}" = "shared"
+    "kubernetes.io/role/elb"                      = 1
   }
 
   private_subnet_tags = {
-    "kubernetes.io/cluster/${var.environment_name}" = "shared"
-    "kubernetes.io/role/internal-elb"               = 1
+    "kubernetes.io/cluster/${local.cluster_name}" = "shared"
+    "kubernetes.io/role/internal-elb"             = 1
   }
 
   tags = module.tags.result
@@ -31,7 +34,7 @@ module "vpc" {
 module "dependencies" {
   source = "../../lib/dependencies"
 
-  environment_name = var.environment_name
+  environment_name = local.cluster_name
   tags             = module.tags.result
 
   vpc_id     = module.vpc.inner.vpc_id
@@ -52,7 +55,7 @@ module "retail_app_eks" {
     helm = helm
   }
 
-  environment_name      = var.environment_name
+  environment_name      = local.cluster_name
   cluster_version       = "1.33"
   vpc_id                = module.vpc.inner.vpc_id
   vpc_cidr              = module.vpc.inner.vpc_cidr_block

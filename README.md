@@ -745,6 +745,28 @@ terraform apply
 terraform output
 ```
 
+**Optional: Customize Cluster Name and Region**
+
+By default, the cluster is named `retail-store` and deployed to `us-east-1`. You can customize these values:
+
+```bash
+# Deploy with custom cluster name and region
+terraform apply -var="cluster_name=my-retail-cluster" -var="region=us-west-2"
+
+# Or create a terraform.tfvars file for persistent configuration
+cat > terraform.tfvars <<EOF
+cluster_name = "my-retail-cluster"
+region       = "us-west-2"
+EOF
+terraform apply
+```
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `cluster_name` | `retail-store` | Name of the EKS cluster |
+| `region` | `us-east-1` | AWS region for deployment |
+| `enable_grafana` | `false` | Enable Amazon Managed Grafana (requires AWS SSO) |
+
 **Optional: Enable Amazon Managed Grafana**
 
 > **⚠️ Important:** Grafana requires AWS IAM Identity Center (SSO) to be configured in your account. If SSO is not set up, Terraform will fail when `enable_grafana=true`. See [Prerequisites - AWS IAM Identity Center](#5-aws-iam-identity-center-sso-for-amazon-managed-grafana) for setup instructions.
@@ -761,7 +783,7 @@ terraform apply -var="enable_grafana=true"
 **Steps to add your IAM role:**
 
 1. Open the [Amazon EKS Console](https://console.aws.amazon.com/eks)
-2. Select your cluster (default name: `retail-store`)
+2. Select your cluster (default name: `retail-store`, or your custom `cluster_name`)
 3. Navigate to **Access** tab → **IAM access entries**
 4. Click **Create access entry**
 5. Configure the access entry:
@@ -778,15 +800,18 @@ terraform apply -var="enable_grafana=true"
 # Get your current IAM identity
 aws sts get-caller-identity
 
+# Get cluster name from Terraform output (or use your custom name)
+CLUSTER_NAME=$(terraform output -raw cluster_name)
+
 # Create access entry (replace YOUR_ROLE_ARN with your actual role ARN)
 aws eks create-access-entry \
-  --cluster-name retail-store \
+  --cluster-name $CLUSTER_NAME \
   --principal-arn YOUR_ROLE_ARN \
   --type STANDARD
 
 # Associate the admin policy
 aws eks associate-access-policy \
-  --cluster-name retail-store \
+  --cluster-name $CLUSTER_NAME \
   --principal-arn YOUR_ROLE_ARN \
   --policy-arn arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy \
   --access-scope type=cluster
@@ -810,7 +835,12 @@ This tag enables the AWS DevOps Agent to automatically discover and monitor reso
 After the EKS cluster is deployed, configure kubectl to access it:
 
 ```bash
-# Update kubeconfig (replace with your cluster name and region)
+# Update kubeconfig using Terraform outputs
+aws eks update-kubeconfig \
+  --name $(terraform output -raw cluster_name) \
+  --region $(terraform output -raw region)
+
+# Or manually specify your cluster name and region
 aws eks update-kubeconfig --name retail-store --region us-east-1
 
 # Verify cluster access
@@ -844,7 +874,12 @@ For security and cost reasons, the default deployment does not create a public-f
 
 ```bash
 # Update your kubeconfig to connect to the EKS cluster
-# Replace 'retail-store' and 'us-east-1' with your actual cluster name and region
+# Using Terraform outputs (recommended)
+aws eks update-kubeconfig \
+  --name $(terraform output -raw cluster_name) \
+  --region $(terraform output -raw region)
+
+# Or manually specify your cluster name and region
 aws eks update-kubeconfig --name retail-store --region us-east-1
 
 # Verify you can connect to the cluster

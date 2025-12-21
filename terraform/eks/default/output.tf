@@ -3,6 +3,16 @@ output "configure_kubectl" {
   value       = module.retail_app_eks.configure_kubectl
 }
 
+output "cluster_name" {
+  description = "Name of the EKS cluster"
+  value       = local.cluster_name
+}
+
+output "region" {
+  description = "AWS region where the cluster is deployed"
+  value       = var.region
+}
+
 output "retail_app_url" {
   description = "URL to access the retail store application"
   value = try(
