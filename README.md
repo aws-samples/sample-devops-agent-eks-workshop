@@ -58,37 +58,22 @@ git --version
 
 ### Clone the Repository
 
-> **First time using GitLab?** If you haven't set up SSH access for GitLab, follow the [GitLab SSH Configuration Guide](https://gitlab.pages.aws.dev/docs/Platform/ssh.html#ssh-config) first.
-
 ```bash
 # Clone the repository
-git clone git@ssh.gitlab.aws.dev:kulkshya/retail-app-automode.git
+git clone https://github.com/aws-samples/AmazonEKS-Devops-agent-sample.git
 
 # Navigate to the project directory
-cd retail-app-automode
-
-# Switch to the devops-agent-integration branch
-git checkout devops-agent-integration
+cd AmazonEKS-Devops-agent-sample
 ```
 
-> **Note:** If the above clone command fails, try using the alternative GitLab URL:
-> ```bash
-> git clone git@gitlab.aws.dev:kulkshya/retail-app-automode.git
-> ```
-
-> **🔧 Troubleshooting Git Clone Issues?** If you're encountering persistent issues with `git clone` (SSH key problems, network restrictions, etc.), you can download the repository as a ZIP file instead:
-> 1. Navigate to the repository in your browser: https://gitlab.aws.dev/kulkshya/retail-app-automode
-> 2. Click the **Download** button (or **Code** → **Download source code**)
-> 3. Select **Download ZIP** (or your preferred format)
-> 4. Extract the ZIP file to your desired location:
+> **🔧 Troubleshooting Git Clone Issues?** If you're encountering issues with `git clone`, you can download the repository as a ZIP file instead:
+> 1. Navigate to the repository in your browser: https://github.com/aws-samples/AmazonEKS-Devops-agent-sample
+> 2. Click the **Code** button → **Download ZIP**
+> 3. Extract the ZIP file to your desired location:
 >    ```bash
->    unzip retail-app-automode-devops-agent-integration.zip
->    cd retail-app-automode-devops-agent-integration
+>    unzip AmazonEKS-Devops-agent-sample-main.zip
+>    cd AmazonEKS-Devops-agent-sample-main
 >    ```
-
-**Branch Information:**
-- `main` - Stable release branch
-- `devops-agent-integration` - Contains DevOps Agent integration with fault injection scenarios and observability setup (recommended for this lab)
 
 ---
 
@@ -112,28 +97,7 @@ This hands-on lab demonstrates how to deploy, operate, and troubleshoot a produc
 
 The Retail Store Sample App is a deliberately over-engineered e-commerce application designed to demonstrate microservices patterns and AWS service integrations:
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                              Amazon EKS Cluster                                  │
-│  ┌─────────┐    ┌─────────┐    ┌─────────┐    ┌──────────┐    ┌──────────────┐  │
-│  │   UI    │───▶│ Catalog │    │  Carts  │    │  Orders  │    │   Checkout   │  │
-│  │ (Java)  │    │  (Go)   │    │ (Java)  │    │  (Java)  │    │   (Node.js)  │  │
-│  └────┬────┘    └────┬────┘    └────┬────┘    └────┬─────┘    └──────┬───────┘  │
-│       │              │              │              │                  │          │
-└───────┼──────────────┼──────────────┼──────────────┼──────────────────┼──────────┘
-        │              │              │              │                  │
-        ▼              ▼              ▼              ▼                  ▼
-  ┌──────────┐   ┌───────────┐  ┌──────────┐  ┌───────────┐      ┌───────────┐
-  │ClusterIP │   │Aurora MySQL│  │ DynamoDB │  │Aurora     │      │ElastiCache│
-  │(Port-Fwd)│   │ (Catalog) │  │ (Carts)  │  │PostgreSQL │      │  (Redis)  │
-  └──────────┘   └───────────┘  └──────────┘  │ (Orders)  │      └───────────┘
-                                              └─────┬─────┘
-                                                    │
-                                              ┌─────▼─────┐
-                                              │ RabbitMQ  │
-                                              │(Amazon MQ)│
-                                              └───────────┘
-```
+![Architecture](./docs/images/architecture.png)
 
 > **Note:** The UI service uses a ClusterIP service type (not a public ALB). To access the application, use `kubectl port-forward svc/ui 8080:80 -n ui` and open http://localhost:8080 in your browser. This approach is intentional for lab/demo environments to avoid exposing the application publicly.
 
