@@ -101,6 +101,12 @@ app:
 ingress:
   enabled: false
   # className: ""
+  # EKS Auto Mode: Create IngressClass and IngressClassParams resources
+  createIngressClass: false
+  # Set to true to make this the default IngressClass
+  isDefaultClass: false
+  # ALB scheme: internet-facing or internal
+  scheme: internet-facing
   annotations: {}
   #   alb.ingress.kubernetes.io/scheme: internet-facing
   #   alb.ingress.kubernetes.io/target-type: ip

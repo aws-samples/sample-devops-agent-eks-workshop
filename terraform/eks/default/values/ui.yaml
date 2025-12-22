@@ -41,8 +41,11 @@ service:
 ingress:
   enabled: true
   className: alb
+  # EKS Auto Mode: Create IngressClass and IngressClassParams for ALB
+  createIngressClass: true
+  isDefaultClass: true
+  scheme: internet-facing
   annotations:
-    alb.ingress.kubernetes.io/scheme: internet-facing
     alb.ingress.kubernetes.io/target-type: ip
     alb.ingress.kubernetes.io/healthcheck-path: /actuator/health/liveness
     # ALB access logs

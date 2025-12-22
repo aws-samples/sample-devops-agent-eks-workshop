@@ -1,0 +1,24 @@
+{{- if .Values.ingress.enabled }}
+{{- if .Values.ingress.createIngressClass }}
+---
+apiVersion: eks.amazonaws.com/v1
+kind: IngressClassParams
+metadata:
+  name: {{ .Values.ingress.className | default "alb" }}
+spec:
+  scheme: {{ .Values.ingress.scheme | default "internet-facing" }}
+---
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  name: {{ .Values.ingress.className | default "alb" }}
+  annotations:
+    ingressclass.kubernetes.io/is-default-class: "{{ .Values.ingress.isDefaultClass | default false }}"
+spec:
+  controller: eks.amazonaws.com/alb
+  parameters:
+    apiGroup: eks.amazonaws.com
+    kind: IngressClassParams
+    name: {{ .Values.ingress.className | default "alb" }}
+{{- end }}
+{{- end }}
