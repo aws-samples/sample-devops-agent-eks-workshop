@@ -1395,47 +1395,71 @@ chmod +x *.sh
 
 ---
 
-### 1. Catalog Service Latency Injection
+### 1. Catalog Service Latency & CPU Stress Injection
 
-Simulates high latency in the Catalog microservice by adding a sidecar that injects network delay and reducing CPU limits.
+Simulates high latency and extreme CPU stress in the Catalog microservice by adding a sidecar that injects network delay and generates CPU load.
 
 **What it does:**
 - Adds 300-500ms latency on outbound HTTP calls via `tc netem`
-- Reduces CPU limits from 256m to 128m (50% reduction)
+- Reduces main container CPU limits from 256m to 128m (throttling)
+- Adds a stress sidecar with 8 CPU workers at 100% load (4000m CPU limit)
+- Triggers HPA to scale pods to maximum replicas
 
 **Expected behavior after injection:**
-- Catalog pods will restart with the new configuration (latency sidecar added)
+- Catalog pods will restart with the new configuration (latency + stress sidecar added)
+- HPA will scale the deployment to maximum replicas (10 pods) due to high CPU
+- All pods will show 2/2 containers (main + latency-injector sidecar)
 - Product pages will load noticeably slower (3-5 seconds instead of <1 second)
-- CPU throttling will cause intermittent slowdowns under load
+- CPU throttling on main container will cause intermittent slowdowns
 - UI service may show timeout errors when fetching product listings
-- Users will experience degraded browsing experience
 
 **Expected symptoms in monitoring:**
-- p99 latency spikes in Prometheus/CloudWatch (300-500ms increase)
-- CPU throttling metrics elevated (`container_cpu_cfs_throttled_seconds_total`)
-- Increased response times in application logs
-- Potential timeout errors from dependent services (UI → Catalog calls)
+
+| Metric | Expected Value |
+|--------|----------------|
+| Pod CPU Utilization | 90-100% (hitting limits) |
+| HPA Replicas | Max (10 pods) |
+| HPA CPU Target | 140-200% (above 70% threshold) |
+| Pod CPU (kubectl top) | 2500-4000m per pod |
+| Container Insights CPU | ~50% node utilization, ~95% over-limit |
+| Response Latency | +300-500ms increase |
+
+**CloudWatch Container Insights metrics:**
+- `pod_cpu_utilization`: Shows percentage of node CPU used by catalog pods
+- `pod_cpu_utilization_over_pod_limit`: Shows pods exceeding their CPU limits (~95%)
 
 **Run the scenario:**
 ```bash
 # Inject the fault
-./inject-catalog-latency.sh
+./fault-injection/inject-catalog-latency.sh
 
-# Verify injection
+# The script will:
+# 1. Backup current deployment
+# 2. Create ConfigMap with stress script
+# 3. Patch deployment with sidecar
+# 4. Wait for rollout
+# 5. Show pod status and CPU usage
+# 6. Wait 60s for HPA scaling
+# 7. Query CloudWatch Container Insights
+# 8. Display summary with HPA status
+
+# Verify injection manually
 kubectl get pods -n catalog
-kubectl logs -n catalog -l app.kubernetes.io/name=catalog -c latency-injector
+kubectl top pods -n catalog --containers
+kubectl get hpa -n catalog
+kubectl logs -n catalog -l app.kubernetes.io/name=catalog -c latency-injector --tail=5
 
-# Rollback
-./rollback-catalog.sh
+# Rollback (scales back to 2 replicas)
+./fault-injection/rollback-catalog.sh
 ```
 
 **DevOps Agent Investigation Prompts:**
 
 Use these prompts when starting an investigation in the AWS DevOps Agent web app:
 
-> **Investigation Details:** "Product pages are loading slow. Users are complaining about the catalog taking forever to load. Started happening about 10 minutes ago."
+> **Investigation Details:** "Product pages are loading slow. Users are complaining about the catalog taking forever to load. HPA has scaled to max pods but CPU is still maxed out. Started happening about 10 minutes ago."
 
-> **Investigation Starting Point:** "Check the catalog service pods in the catalog namespace. Look at latency metrics and CPU usage."
+> **Investigation Starting Point:** "Check the catalog service pods in the catalog namespace. Look at CPU utilization, HPA status, and latency metrics."
 
 ---
 
