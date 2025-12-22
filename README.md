@@ -1577,33 +1577,31 @@ Simulates an accidental security group change that blocks EKS nodes from connect
 **Run the scenario:**
 ```bash
 # Inject the fault (auto-discovers and blocks all RDS instances)
-./inject-rds-sg-block.sh
+./fault-injection/inject-rds-sg-block.sh
 
 # Rollback (restores all revoked rules)
-./rollback-rds-sg-block.sh
+./fault-injection/rollback-rds-sg-block.sh
 ```
 
 **Check application logs for errors:**
 ```bash
-# Orders service logs (PostgreSQL connection errors)
-kubectl logs -n orders -l app.kubernetes.io/name=orders --tail=50
-
-# Checkout service logs
-kubectl logs -n checkout -l app.kubernetes.io/name=checkout --tail=50
+# Orders service logs (PostgreSQL/HikariCP errors)
+kubectl logs -n orders -l app.kubernetes.io/name=orders --tail=100 | grep -iE "HikariPool|SocketTimeoutException|connection attempt failed"
 
 # Catalog service logs (MySQL connection errors)
-kubectl logs -n catalog -l app.kubernetes.io/name=catalog --tail=50
+kubectl logs -n catalog -l app.kubernetes.io/name=catalog --tail=100 | grep -iE "i/o timeout|failed to connect|panic"
 ```
 
-**Expected error messages in logs:**
+**Expected error messages:**
 ```
+# Orders (PostgreSQL)
+HikariPool-1 - Pool is empty, failed to create/setup connection
 org.postgresql.util.PSQLException: The connection attempt failed.
 Caused by: java.net.SocketTimeoutException: Connect timed out
 
-com.zaxxer.hikari.pool.PoolBase: HikariPool-1 - Pool is empty, failed to create/setup connection
-
-Error 1045 (28000): Access denied for user... (MySQL)
-java.sql.SQLNonTransientConnectionException: Could not connect to address
+# Catalog (MySQL)
+[error] failed to initialize database, got error dial tcp 10.0.x.x:3306: i/o timeout
+panic: failed to connect database
 ```
 
 **DevOps Agent Investigation Prompts:**
