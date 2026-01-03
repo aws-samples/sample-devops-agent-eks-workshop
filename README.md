@@ -100,19 +100,19 @@ This hands-on lab demonstrates how to deploy, operate, and troubleshoot a produc
 
 The Retail Store Sample App is a deliberately over-engineered e-commerce application designed to demonstrate microservices patterns and AWS service integrations:
 
-![Architecture](./generated-diagrams/retail-store-architecture.png)
+![Architecture](./docs/images/retail-store-architecture.png)
 
 #### Microservices Data Flow
 
 The following diagram shows how the microservices communicate with each other and their backend data stores:
 
-![Microservices Data Flow](./generated-diagrams/retail-store-microservices.png)
+![Microservices Data Flow](./docs/images/retail-store-microservices.png)
 
 #### Observability Architecture
 
 The comprehensive observability stack provides full visibility into application and infrastructure health:
 
-![Observability Architecture](./generated-diagrams/retail-store-observability.png)
+![Observability Architecture](./docs/images/retail-store-observability.png)
 
 > **Note:** An editable Draw.io version of the architecture diagram is available at [`docs/retail-store-architecture.drawio`](./docs/retail-store-architecture.drawio)
 
@@ -329,7 +329,7 @@ AMP provides a fully managed Prometheus-compatible monitoring service.
 
 The EKS Managed Prometheus Scraper collects metrics from multiple sources:
 
-![Prometheus Scraper Architecture](./generated-diagrams/prometheus-scraper.png)
+![Prometheus Scraper Architecture](./docs/images/prometheus-scraper.png)
 
 **Key Metrics Available:**
 
@@ -509,10 +509,6 @@ OTEL_JAVA_GLOBAL_AUTOCONFIGURE_ENABLED: "true"
 - W3C Baggage (`baggage`)
 
 **Sampling:** Always-on sampling for complete trace visibility
-
-#### Metrics Flow Architecture
-
-![Metrics Flow Architecture](./docs/images/metrics-flow.png)
 
 #### Viewing Observability Data
 
