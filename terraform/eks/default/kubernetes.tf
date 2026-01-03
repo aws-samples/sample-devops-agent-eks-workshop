@@ -201,6 +201,45 @@ resource "helm_release" "orders" {
   ]
 }
 
+# EKS Auto Mode: IngressClass and IngressClassParams for ALB
+# Using null_resource with kubectl to avoid plan-time cluster connection issues
+resource "null_resource" "ingress_class" {
+  depends_on = [
+    time_sleep.workloads
+  ]
+
+  provisioner "local-exec" {
+    interpreter = ["/bin/bash", "-c"]
+    environment = {
+      KUBECONFIG = base64encode(local.kubeconfig)
+    }
+
+    command = <<-EOT
+      cat <<EOF | kubectl apply --kubeconfig <(echo $KUBECONFIG | base64 -d) -f -
+apiVersion: eks.amazonaws.com/v1
+kind: IngressClassParams
+metadata:
+  name: alb
+spec:
+  scheme: internet-facing
+---
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  name: alb
+  annotations:
+    ingressclass.kubernetes.io/is-default-class: "true"
+spec:
+  controller: eks.amazonaws.com/alb
+  parameters:
+    apiGroup: eks.amazonaws.com
+    kind: IngressClassParams
+    name: alb
+EOF
+    EOT
+  }
+}
+
 resource "kubernetes_namespace_v1" "ui" {
   depends_on = [
     time_sleep.workloads
@@ -215,6 +254,7 @@ resource "kubernetes_namespace_v1" "ui" {
 
 resource "helm_release" "ui" {
   depends_on = [
+    null_resource.ingress_class,
     helm_release.catalog,
     helm_release.carts,
     helm_release.checkout,

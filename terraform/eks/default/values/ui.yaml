@@ -46,8 +46,10 @@ ingress:
   isDefaultClass: true
   scheme: internet-facing
   annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
     alb.ingress.kubernetes.io/target-type: ip
     alb.ingress.kubernetes.io/healthcheck-path: /actuator/health/liveness
+    alb.ingress.kubernetes.io/tags: eks:eks-cluster-name=retail-store
     # ALB access logs
     alb.ingress.kubernetes.io/load-balancer-attributes: access_logs.s3.enabled=true,access_logs.s3.bucket=${alb_logs_bucket},access_logs.s3.prefix=ui-alb
 %{ endif }
