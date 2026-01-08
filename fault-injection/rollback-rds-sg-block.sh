@@ -1,6 +1,6 @@
 #!/bin/bash
 # RDS Security Group Rollback
-# Restores security group rules by adding the CURRENT EKS cluster SG to all RDS instances
+# Restores security group rules by adding the CURRENT EKS cluster SG and VPC CIDR to all RDS instances
 
 set -e
 
@@ -14,7 +14,7 @@ echo "Region: $REGION"
 echo ""
 
 # Step 1: Always discover the CURRENT EKS cluster SG (don't rely on backup)
-echo "[1/4] Discovering current EKS cluster security group..."
+echo "[1/5] Discovering current EKS cluster security group..."
 EKS_CLUSTER=$(AWS_PAGER="" aws eks list-clusters --region $REGION --query "clusters[0]" --output text 2>/dev/null)
 
 if [ -z "$EKS_CLUSTER" ] || [ "$EKS_CLUSTER" == "None" ]; then
@@ -34,8 +34,20 @@ if [ -z "$EKS_CLUSTER_SG" ] || [ "$EKS_CLUSTER_SG" == "None" ]; then
   exit 1
 fi
 
-# Step 2: Discover all RDS instances
-echo "[2/4] Discovering RDS instances..."
+# Step 2: Get VPC CIDR for the cluster
+echo "[2/5] Discovering VPC CIDR..."
+VPC_ID=$(AWS_PAGER="" aws eks describe-cluster --region $REGION --name "$EKS_CLUSTER" \
+  --query "cluster.resourcesVpcConfig.vpcId" --output text 2>/dev/null)
+
+VPC_CIDR=$(AWS_PAGER="" aws ec2 describe-vpcs --region $REGION --vpc-ids $VPC_ID \
+  --query "Vpcs[0].CidrBlock" --output text 2>/dev/null)
+
+echo "  VPC ID: $VPC_ID"
+echo "  VPC CIDR: $VPC_CIDR"
+echo ""
+
+# Step 3: Discover all RDS instances
+echo "[3/5] Discovering RDS instances..."
 RDS_INFO=$(AWS_PAGER="" aws rds describe-db-instances --region $REGION \
   --query "DBInstances[*].[DBInstanceIdentifier,VpcSecurityGroups[0].VpcSecurityGroupId,Endpoint.Port,Engine]" \
   --output json 2>/dev/null)
@@ -49,8 +61,8 @@ echo "  Found RDS instances:"
 echo "$RDS_INFO" | jq -r '.[] | "    - \(.[0]) (\(.[3]), Port: \(.[2]), SG: \(.[1]))"'
 echo ""
 
-# Step 3: Add EKS cluster SG to all RDS security groups
-echo "[3/4] Adding EKS cluster SG to RDS security groups..."
+# Step 4: Add EKS cluster SG and VPC CIDR to all RDS security groups
+echo "[4/5] Adding EKS cluster SG and VPC CIDR to RDS security groups..."
 echo ""
 
 RESTORED=0
@@ -65,6 +77,7 @@ for i in $(seq 0 $((RDS_COUNT - 1))); do
   
   echo "  Restoring: $DB_ID ($DB_ENGINE, Port: $DB_PORT)"
   
+  # Add EKS cluster security group
   if AWS_PAGER="" aws ec2 authorize-security-group-ingress \
     --group-id $RDS_SG \
     --protocol tcp \
@@ -74,13 +87,25 @@ for i in $(seq 0 $((RDS_COUNT - 1))); do
     echo "    ✓ Added EKS SG $EKS_CLUSTER_SG to $RDS_SG on port $DB_PORT"
     RESTORED=$((RESTORED + 1))
   else
-    echo "    ✗ Failed to add (rule may already exist)"
-    FAILED=$((FAILED + 1))
+    echo "    - EKS SG rule already exists or failed"
+  fi
+  
+  # Add VPC CIDR (for EKS Auto Mode compatibility)
+  if AWS_PAGER="" aws ec2 authorize-security-group-ingress \
+    --group-id $RDS_SG \
+    --protocol tcp \
+    --port $DB_PORT \
+    --cidr $VPC_CIDR \
+    --region $REGION 2>/dev/null; then
+    echo "    ✓ Added VPC CIDR $VPC_CIDR to $RDS_SG on port $DB_PORT"
+    RESTORED=$((RESTORED + 1))
+  else
+    echo "    - VPC CIDR rule already exists or failed"
   fi
 done
 
 echo ""
-echo "[4/4] Verifying restoration..."
+echo "[5/5] Verifying restoration..."
 echo ""
 
 for i in $(seq 0 $((RDS_COUNT - 1))); do
@@ -104,16 +129,27 @@ for i in $(seq 0 $((RDS_COUNT - 1))); do
   else
     echo "  ✗ WARNING: EKS cluster SG ($EKS_CLUSTER_SG) NOT found in rules!"
   fi
+  
+  # Check if VPC CIDR is in the rules
+  HAS_VPC_CIDR=$(AWS_PAGER="" aws ec2 describe-security-groups --region $REGION \
+    --group-ids $RDS_SG \
+    --query "SecurityGroups[0].IpPermissions[?IpRanges[?CidrIp=='$VPC_CIDR']]" \
+    --output text 2>/dev/null)
+  
+  if [ -n "$HAS_VPC_CIDR" ]; then
+    echo "  ✓ VPC CIDR ($VPC_CIDR) is present"
+  else
+    echo "  ✗ WARNING: VPC CIDR ($VPC_CIDR) NOT found in rules!"
+  fi
   echo ""
 done
 
 echo "=== Security Group Rollback Complete ==="
 echo "Restored: $RESTORED rules"
-echo "Failed/Already existed: $FAILED rules"
 echo ""
 
 # Restart pods
-echo "[5/5] Restarting application pods..."
+echo "Restarting application pods..."
 
 if kubectl get deployment -n catalog catalog &>/dev/null; then
   kubectl rollout restart deployment -n catalog catalog 2>/dev/null && echo "  ✓ Restarted catalog deployment"

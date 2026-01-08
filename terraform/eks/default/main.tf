@@ -89,6 +89,7 @@ module "dependencies" {
   tags             = module.tags.result
 
   vpc_id     = module.vpc.inner.vpc_id
+  vpc_cidr   = module.vpc.inner.vpc_cidr_block
   subnet_ids = module.vpc.inner.private_subnets
 
   catalog_security_group_id  = local.security_groups_active ? aws_security_group.catalog.id : module.retail_app_eks.node_security_group_id

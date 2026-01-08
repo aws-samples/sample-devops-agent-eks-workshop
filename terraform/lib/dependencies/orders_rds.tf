@@ -14,7 +14,9 @@ module "orders_rds" {
   vpc_id  = var.vpc_id
   subnets = var.subnet_ids
 
+  # Allow access from both security groups and VPC CIDR (for EKS Auto Mode compatibility)
   allowed_security_groups = concat(var.allowed_security_group_ids, [var.orders_security_group_id])
+  allowed_cidr_blocks     = [var.vpc_cidr]
 
   master_password        = random_string.orders_db_master.result
   create_random_password = false

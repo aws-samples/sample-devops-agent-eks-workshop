@@ -39,3 +39,8 @@ variable "allowed_security_group_ids" {
   default     = []
   description = "List of additional allowed security group IDs"
 }
+
+variable "vpc_cidr" {
+  type        = string
+  description = "VPC CIDR block for database access (EKS Auto Mode compatibility)"
+}
