@@ -170,66 +170,8 @@ fi
 echo ""
 echo "=== Fault Injection Active ==="
 echo ""
-echo "Expected symptoms:"
-echo "  - Response times 300-500ms higher than normal"
-echo "  - HPA scaling to max replicas (10 pods)"
-echo "  - All pods at ~100% CPU utilization in Container Insights"
-echo "  - CPU throttling on main container (limited to 128m)"
-echo "  - Potential timeout errors from dependent services"
-echo ""
 echo "Check latency + stress injector logs:"
 echo "  kubectl logs -n $NAMESPACE -l app.kubernetes.io/name=catalog -c latency-injector --tail=10"
 echo ""
 echo "Rollback:"
 echo "  ./~/fault-injection/rollback-catalog.sh"
-
-# Step 8: Wait for HPA to scale and metrics to populate
-echo ""
-echo "[8/10] Waiting 60s for HPA scaling and metrics to populate..."
-sleep 60
-
-# Step 9: Check HPA status
-echo ""
-echo "[9/10] Checking HPA status..."
-kubectl get hpa -n $NAMESPACE
-echo ""
-
-# Step 10: Query Container Insights for CPU utilization
-echo "[10/10] Querying CloudWatch Container Insights for CPU metrics..."
-CLUSTER_NAME=$(kubectl config current-context | sed 's/.*\///' | sed 's/arn:aws:eks:[^:]*:[^:]*:cluster\///')
-echo "  Cluster: $CLUSTER_NAME"
-echo ""
-
-echo "  Pod CPU Utilization (last 5 minutes):"
-aws cloudwatch get-metric-statistics \
-  --namespace ContainerInsights \
-  --metric-name pod_cpu_utilization \
-  --dimensions Name=ClusterName,Value=$CLUSTER_NAME Name=Namespace,Value=$NAMESPACE \
-  --start-time $(date -u -d '5 minutes ago' +%Y-%m-%dT%H:%M:%SZ) \
-  --end-time $(date -u +%Y-%m-%dT%H:%M:%SZ) \
-  --period 60 \
-  --statistics Average Maximum \
-  --output table 2>/dev/null || echo "  CloudWatch metrics not available yet"
-
-echo ""
-echo "  Pod CPU Utilization Over Limit:"
-aws cloudwatch get-metric-statistics \
-  --namespace ContainerInsights \
-  --metric-name pod_cpu_utilization_over_pod_limit \
-  --dimensions Name=ClusterName,Value=$CLUSTER_NAME Name=Namespace,Value=$NAMESPACE \
-  --start-time $(date -u -d '5 minutes ago' +%Y-%m-%dT%H:%M:%SZ) \
-  --end-time $(date -u +%Y-%m-%dT%H:%M:%SZ) \
-  --period 60 \
-  --statistics Average Maximum \
-  --output table 2>/dev/null || echo "  CloudWatch metrics not available yet"
-
-echo ""
-echo "=== Summary ==="
-echo ""
-echo "HPA Status:"
-kubectl get hpa -n $NAMESPACE -o custom-columns='NAME:.metadata.name,TARGETS:.status.currentMetrics[0].resource.current.averageUtilization,MIN:.spec.minReplicas,MAX:.spec.maxReplicas,REPLICAS:.status.currentReplicas' 2>/dev/null || kubectl get hpa -n $NAMESPACE
-echo ""
-echo "Pod CPU (kubectl top):"
-kubectl top pods -n $NAMESPACE --no-headers 2>/dev/null | head -5 | sed 's/^/  /'
-echo ""
-echo "If HPA is at max replicas and CPU is high, fault injection is working correctly."
