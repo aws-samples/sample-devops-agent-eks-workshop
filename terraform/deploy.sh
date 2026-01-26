@@ -132,19 +132,49 @@ if [ "$ENABLE_GRAFANA" = "true" ]; then
     echo "  See: https://docs.aws.amazon.com/grafana/latest/userguide/authentication-in-AMG-SSO.html"
 fi
 
+# Check Helm
+if ! command -v helm &> /dev/null; then
+    print_error "Helm not found"
+    echo "Install Helm: https://helm.sh/docs/intro/install/"
+    exit 1
+fi
+print_success "Helm found"
+
+# Check network connectivity to AWS
+echo "Checking network connectivity..."
+if ! curl -s --connect-timeout 10 https://sts.$REGION.amazonaws.com > /dev/null 2>&1; then
+    print_error "Cannot reach AWS endpoints"
+    echo "  Check your internet connection and VPN status"
+    exit 1
+fi
+print_success "AWS endpoints reachable"
+
 # =============================================================================
-# Step 3: Initialize Terraform
+# Step 3: Authenticate to ECR Public
 # =============================================================================
-print_header "Step 3: Initializing Terraform"
+print_header "Step 3: Authenticating to ECR Public"
+
+echo "Logging into ECR Public registry (required for Helm charts)..."
+if aws ecr-public get-login-password --region us-east-1 | helm registry login --username AWS --password-stdin public.ecr.aws 2>/dev/null; then
+    print_success "ECR Public authentication successful"
+else
+    print_warning "ECR Public authentication failed - deployment may hit rate limits"
+    echo "  You can manually run: aws ecr-public get-login-password --region us-east-1 | helm registry login --username AWS --password-stdin public.ecr.aws"
+fi
+
+# =============================================================================
+# Step 4: Initialize Terraform
+# =============================================================================
+print_header "Step 4: Initializing Terraform"
 
 cd "$TERRAFORM_DIR"
 terraform init -input=false
 print_success "Terraform initialized"
 
 # =============================================================================
-# Step 4: Plan Deployment
+# Step 5: Plan Deployment
 # =============================================================================
-print_header "Step 4: Planning Deployment"
+print_header "Step 5: Planning Deployment"
 
 terraform plan \
     -var="cluster_name=$CLUSTER_NAME" \
@@ -155,9 +185,9 @@ terraform plan \
 print_success "Terraform plan created"
 
 # =============================================================================
-# Step 5: Apply Terraform
+# Step 6: Apply Terraform
 # =============================================================================
-print_header "Step 5: Deploying Infrastructure (this takes ~25-30 minutes)"
+print_header "Step 6: Deploying Infrastructure (this takes ~25-30 minutes)"
 
 START_TIME=$(date +%s)
 
@@ -171,17 +201,17 @@ SECONDS=$((DURATION % 60))
 print_success "Infrastructure deployed in ${MINUTES}m ${SECONDS}s"
 
 # =============================================================================
-# Step 6: Configure kubectl
+# Step 7: Configure kubectl
 # =============================================================================
-print_header "Step 6: Configuring kubectl"
+print_header "Step 7: Configuring kubectl"
 
 aws eks update-kubeconfig --name "$CLUSTER_NAME" --region "$REGION"
 print_success "kubectl configured for cluster: $CLUSTER_NAME"
 
 # =============================================================================
-# Step 6: Wait for Application Pods
+# Step 8: Wait for Application Pods
 # =============================================================================
-print_header "Step 6: Waiting for Application Pods"
+print_header "Step 8: Waiting for Application Pods"
 
 echo "Waiting for UI service..."
 kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=ui -n ui --timeout=300s 2>/dev/null || true
@@ -201,9 +231,9 @@ kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=checkout -n che
 print_success "All application pods ready"
 
 # =============================================================================
-# Step 7: Get Application URL
+# Step 9: Get Application URL
 # =============================================================================
-print_header "Step 7: Getting Application URL"
+print_header "Step 9: Getting Application URL"
 
 # Wait for ALB to be provisioned
 echo "Waiting for Application Load Balancer..."
@@ -242,7 +272,7 @@ echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━�
 echo -e "${BLUE}Next Steps:${NC}"
 echo ""
 echo "1. Create an Agent Space in the DevOps Agent console:"
-echo "   https://console.aws.amazon.com/devops-agent/home?region=us-east-1"
+echo "   https://console.aws.amazon.com/devops-agent/home?region=$REGION"
 echo ""
 echo "2. Add tag filter during Agent Space creation:"
 echo "   Tag Key: devopsagent    Tag Value: true"
