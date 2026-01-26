@@ -6,6 +6,36 @@
 
 ---
 
+## What is this Workshop?
+
+This is a hands-on workshop designed to demonstrate the investigation capabilities of **AWS DevOps Agent** - an AI-powered assistant that automatically diagnoses and troubleshoots infrastructure issues in your AWS environment.
+
+### How it Works
+
+1. **Deploy** a real microservices application (Retail Store) on Amazon EKS
+2. **Inject faults** using provided scripts that simulate real-world production issues
+3. **Investigate** using AWS DevOps Agent with natural language prompts
+4. **Learn** how the agent analyzes logs, metrics, traces, and configurations to identify root causes
+
+### What You'll Learn
+
+- How AWS DevOps Agent investigates infrastructure issues across EKS, RDS, DynamoDB, and more
+- Common failure patterns in Kubernetes environments (CPU stress, memory leaks, network issues)
+- How to use natural language to troubleshoot complex distributed systems
+- Best practices for diagnosing performance degradation, connectivity failures, and resource exhaustion
+
+### Workshop Flow
+
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│  Deploy EKS     │ ──▶ │  Inject Fault   │ ──▶ │  Investigate    │ ──▶ │  Learn & Fix    │
+│  Environment    │     │  (Break things) │     │  with DevOps    │     │  (Rollback)     │
+│                 │     │                 │     │  Agent          │     │                 │
+└─────────────────┘     └─────────────────┘     └─────────────────┘     └─────────────────┘
+```
+
+---
+
 > **⚠️ Disclaimer:** This repository includes intentional fault injection scenarios designed to demonstrate the AWS DevOps Agent's investigation capabilities. **Do not run these scripts in production environments.**
 
 > **📦 Source Code:** The Retail Store Sample Application source: https://github.com/aws-containers/retail-store-sample-app
