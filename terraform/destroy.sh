@@ -49,23 +49,40 @@ if [ "$VPC_ID" != "None" ] && [ "$VPC_ID" != "null" ] && [ -n "$VPC_ID" ]; then
     done
 fi
 
-# Step 3: Run Terraform destroy (remove Kubernetes resources from state first to avoid provider issues)
+# Step 3: Delete the EKS cluster first and wait for Auto Mode to fully drain.
+# EKS Auto Mode's control plane (Karpenter + Tagging Controller) uses the cluster
+# IAM role to tag/untag EC2 instances, ENIs, and volumes. If terraform destroys
+# the role's policy attachments while the control plane is still tearing down
+# Auto Mode compute, tag calls return AccessDenied and trip the EKS service
+# team's regional TaggingController alarm. Deleting the cluster synchronously
+# here ensures the control plane is gone before its IAM role is removed.
 echo ""
-echo "=== Step 3: Removing Kubernetes resources from Terraform state ==="
+echo "=== Step 3: Deleting EKS cluster and waiting for Auto Mode to drain ==="
+if aws eks describe-cluster --name "$CLUSTER_NAME" --region "$REGION" >/dev/null 2>&1; then
+    aws eks delete-cluster --name "$CLUSTER_NAME" --region "$REGION" 2>/dev/null || true
+    echo "Waiting for cluster $CLUSTER_NAME to be deleted..."
+    aws eks wait cluster-deleted --name "$CLUSTER_NAME" --region "$REGION" 2>/dev/null || true
+else
+    echo "Cluster $CLUSTER_NAME not found, skipping."
+fi
+
+# Step 4: Run Terraform destroy (remove Kubernetes resources from state first to avoid provider issues)
+echo ""
+echo "=== Step 4: Removing Kubernetes resources from Terraform state ==="
 cd $TERRAFORM_DIR
 terraform state rm 'kubernetes_config_map_v1_data.aws_auth' 2>/dev/null || true
 terraform state rm 'helm_release.ui' 'helm_release.catalog' 'helm_release.carts' 'helm_release.orders' 'helm_release.checkout' 2>/dev/null || true
 terraform state rm 'kubernetes_namespace.ui' 'kubernetes_namespace.catalog' 'kubernetes_namespace.carts' 'kubernetes_namespace.orders' 'kubernetes_namespace.checkout' 'kubernetes_namespace.rabbitmq' 2>/dev/null || true
 
 echo ""
-echo "=== Step 4: Running Terraform destroy ==="
+echo "=== Step 5: Running Terraform destroy ==="
 terraform destroy -auto-approve || true
 cd - > /dev/null
 
-# Step 5: Final VPC cleanup if it still exists
+# Step 6: Final VPC cleanup if it still exists
 if [ "$VPC_ID" != "None" ] && [ "$VPC_ID" != "null" ] && [ -n "$VPC_ID" ]; then
     echo ""
-    echo "=== Step 5: Final VPC cleanup ==="
+    echo "=== Step 6: Final VPC cleanup ==="
     
     # Check if VPC still exists
     VPC_EXISTS=$(aws ec2 describe-vpcs --vpc-ids $VPC_ID --query "Vpcs[0].VpcId" --output text --region $REGION 2>/dev/null || echo "None")
@@ -130,9 +147,9 @@ if [ "$VPC_ID" != "None" ] && [ "$VPC_ID" != "null" ] && [ -n "$VPC_ID" ]; then
     fi
 fi
 
-# Step 6: Clean up CloudWatch log groups created by Container Insights
+# Step 7: Clean up CloudWatch log groups created by Container Insights
 echo ""
-echo "=== Step 6: Cleaning up CloudWatch log groups ==="
+echo "=== Step 7: Cleaning up CloudWatch log groups ==="
 LOG_GROUPS=$(aws logs describe-log-groups --log-group-name-prefix "/aws/containerinsights/$CLUSTER_NAME" --query "logGroups[*].logGroupName" --output text --region $REGION 2>/dev/null || echo "")
 for lg in $LOG_GROUPS; do
     echo "Deleting log group: $lg"
